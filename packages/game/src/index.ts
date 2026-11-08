@@ -5,3 +5,6 @@
  * its request/session/position identity still matches.
  */
 export const PACKAGE_NAME = "@chessonglass/game";
+
+export { PositionConfirmationService } from "./position-confirmation.js";
+export type { PositionConfirmation } from "./position-confirmation.js";
