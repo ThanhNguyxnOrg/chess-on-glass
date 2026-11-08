@@ -10,3 +10,5 @@ export { parseObservation } from "./observations.js";
 export type { Observation, PieceColor, PieceKind, PieceObservation } from "@chessonglass/contracts";
 export { ProviderError, toReadFailure } from "./reader.js";
 export type { BoardReader, ReadFailure, ReadFailureCode, ReadResult } from "./reader.js";
+export { PeriodicFullReadFilter, inspectWithPreFilter } from "./prefilter.js";
+export type { PreFilter, PreFilterDecision } from "./prefilter.js";

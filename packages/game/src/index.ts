@@ -8,3 +8,5 @@ export const PACKAGE_NAME = "@chessonglass/game";
 
 export { PositionConfirmationService } from "./position-confirmation.js";
 export type { PositionConfirmation } from "./position-confirmation.js";
+export { CostLedger } from "./budget.js";
+export type { LedgerSnapshot, Price, ReservationDecision } from "./budget.js";
