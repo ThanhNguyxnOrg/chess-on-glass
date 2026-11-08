@@ -1,6 +1,7 @@
-import { Chess, DEFAULT_POSITION, validateFen } from "chess.js";
+import { Chess, DEFAULT_POSITION, validateFen, type PieceSymbol } from "chess.js";
 import type {
   GamePosition,
+  PieceKind,
   PositionUncertainty,
   Promotion
 } from "@chessonglass/contracts";
@@ -10,6 +11,21 @@ const DEFAULT_UNCERTAINTY: PositionUncertainty = Object.freeze({
   enPassant: false,
   promotion: false
 });
+
+/** A placed piece as seen by ChessOnGlass; square order is a8..h1, row-major. */
+export type BoardPiece = Readonly<{
+  color: "white" | "black";
+  kind: Exclude<PieceKind, "unknown">;
+}>;
+
+const KIND_BY_SYMBOL: Readonly<Record<PieceSymbol, BoardPiece["kind"]>> = {
+  p: "pawn",
+  n: "knight",
+  b: "bishop",
+  r: "rook",
+  q: "queen",
+  k: "king"
+};
 
 export class IllegalMoveError extends Error {
   readonly uci: string;
@@ -116,6 +132,22 @@ export class ChessState {
         ? { uci: move.lan, san: move.san }
         : { uci: move.lan, san: move.san, promotion };
     });
+  }
+
+  /**
+   * Snapshot the board in the same square order as observations: index 0 is
+   * a8, index 63 is h1. The returned array and entries are fresh copies, so
+   * callers cannot mutate chess.js state through them.
+   */
+  pieces(): readonly (BoardPiece | null)[] {
+    return this.chess.board().flat().map((cell) =>
+      cell === null
+        ? null
+        : {
+            color: cell.color === "w" ? "white" : "black",
+            kind: KIND_BY_SYMBOL[cell.type]
+          }
+    );
   }
 
   apply(uci: string): GamePosition {
