@@ -1,0 +1,12 @@
+node_modules/
+dist/
+.DS_Store
+
+# Recordings can show the opponent and the room; keep them local.
+fixtures/*.mov
+fixtures/*.MOV
+fixtures/*.mp4
+
+# Eval logs and cached model answers
+evals/out/
+evals/.cache/

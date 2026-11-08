@@ -1,0 +1,40 @@
+{
+  "name": "chesshacker",
+  "version": "0.2.0",
+  "description": "Meta glasses + a WhatsApp video call + a vision model + Stockfish: hear the best chess move.",
+  "author": "picklerpeej",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "bin": {
+    "chesshacker": "dist/bin.js"
+  },
+  "scripts": {
+    "build": "rm -rf dist && tsc -p tsconfig.build.json && cp -R src/static dist/ && chmod +x dist/bin.js",
+    "prepare": "npm run build",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "eval": "tsx --disable-warning=ExperimentalWarning evals/score.ts"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.135.0",
+    "@typesafe-ai/sdk": "^0.7.0",
+    "chess.js": "^1.4.0",
+    "commander": "^14.0.3",
+    "ffmpeg-static": "^5.3.0",
+    "openai": "^7.36.0",
+    "sharp": "^0.35.5"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.5",
+    "tsx": "^4.23.15",
+    "typescript": "^7.0.2",
+    "vite": "^6.4.4",
+    "vitest": "^4.1.12"
+  },
+  "files": [
+    "dist"
+  ]
+}

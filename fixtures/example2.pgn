@@ -1,0 +1,7 @@
+[Event "Example clip 2: joined mid-game, wearer plays black; White plays Rf1+ at about 22s"]
+[Site "fixtures/example2-black.mov"]
+[Result "*"]
+[SetUp "1"]
+[FEN "2b5/1p3k1p/8/ppB5/8/8/PPP3PP/3RR1K1 w - - 0 1"]
+
+1. Rf1+ *
