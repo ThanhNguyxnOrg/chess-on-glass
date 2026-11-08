@@ -5,3 +5,6 @@
  * exposed to callers.
  */
 export const PACKAGE_NAME = "@chessonglass/chess";
+
+export { ChessState, IllegalMoveError, InvalidPositionError } from "./state.js";
+export { toPgn } from "./pgn.js";
