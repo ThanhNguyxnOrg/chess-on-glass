@@ -11,3 +11,7 @@ export { ProcessFailure, runProcess } from "./process.js";
 export type { ProcessFailureCode, ProcessResult } from "./process.js";
 export { redactLog } from "./log.js";
 export type { PlatformServices } from "./services.js";
+export { selectArtifact, verifyFileDigest } from "./artifacts.js";
+export type { Artifact } from "./artifacts.js";
+export { UciEngine } from "./uci.js";
+export type { Advisor, UciStartOptions } from "./uci.js";

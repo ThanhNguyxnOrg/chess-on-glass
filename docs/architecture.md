@@ -34,6 +34,7 @@ The direction is enforced by package manifests and review, not by a runtime mech
 - `npm test` — all new unit/contract tests under `packages/*/test`.
 - `npm run test:unit` — same suite, explicit package scope.
 - Native/real-engine/cloud tests are separate, explicitly labelled jobs added by later slices. A skipped native test must fail its release job; no silent skip in this base job.
+- `npm run test:engine` is release-only. It requires `CHESSONGLASS_STOCKFISH` to point at an approved binary whose version and SHA-256 match `docs/rights/artifacts.json`. The command fails when the binary is absent; it is never converted to `describe.skipIf`.
 
 ## Secret-storage contract to verify in the Windows/platform slice
 
