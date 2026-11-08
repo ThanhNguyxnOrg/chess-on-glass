@@ -15,4 +15,10 @@ export type {
   Promotion
 } from "./positions.js";
 export type { Capabilities, Frame, FrameSource, RequestContext } from "./frames.js";
+export type {
+  Observation,
+  PieceColor,
+  PieceKind,
+  PieceObservation
+} from "./observations.js";
 export { LatestFrameMailbox } from "./mailbox.js";
