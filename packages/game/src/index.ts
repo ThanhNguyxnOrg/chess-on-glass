@@ -10,3 +10,18 @@ export { PositionConfirmationService } from "./position-confirmation.js";
 export type { PositionConfirmation } from "./position-confirmation.js";
 export { CostLedger } from "./budget.js";
 export type { LedgerSnapshot, Price, ReservationDecision } from "./budget.js";
+export {
+  InvalidGameRecordError,
+  isCanonicalSessionId,
+  markForResume,
+  parseGameRecord,
+  recordPgn,
+  serializeGameRecord
+} from "./journal.js";
+export type { GameRecord, ResumableGameRecord } from "./journal.js";
+export {
+  FileGameStore,
+  GameNotFoundError,
+  GameRecordConflictError
+} from "./storage.js";
+export type { FileGameStoreOptions, GameStore } from "./storage.js";
