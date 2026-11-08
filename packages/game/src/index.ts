@@ -1,0 +1,7 @@
+/**
+ * Session-aware game coordination for ChessOnGlass.
+ *
+ * A single writer owns the live game; asynchronous work is accepted only when
+ * its request/session/position identity still matches.
+ */
+export const PACKAGE_NAME = "@chessonglass/game";

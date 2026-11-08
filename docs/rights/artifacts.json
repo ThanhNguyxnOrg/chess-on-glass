@@ -1,0 +1,28 @@
+{
+  "schemaVersion": 1,
+  "note": "Every value marked 'unverified' must be replaced by measured evidence before distribution. Do not guess.",
+  "artifacts": [
+    {
+      "id": "stockfish",
+      "version": "unverified",
+      "url": "unverified",
+      "sha256": "unverified",
+      "os": "unverified",
+      "arch": "unverified",
+      "license": "unverified",
+      "sourceUrl": "unverified",
+      "buildFlags": "unverified"
+    },
+    {
+      "id": "ffmpeg",
+      "version": "unverified",
+      "url": "unverified",
+      "sha256": "unverified",
+      "os": "unverified",
+      "arch": "unverified",
+      "license": "unverified",
+      "sourceUrl": "unverified",
+      "buildFlags": "unverified"
+    }
+  ]
+}

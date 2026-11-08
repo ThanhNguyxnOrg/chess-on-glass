@@ -1,6 +1,8 @@
 node_modules/
 dist/
 .DS_Store
+coverage/
+*.tsbuildinfo
 
 # Recordings can show the opponent and the room; keep them local.
 fixtures/*.mov
@@ -10,3 +12,6 @@ fixtures/*.mp4
 # Eval logs and cached model answers
 evals/out/
 evals/.cache/
+
+# Short-lived agent workspace (self-ignored there too).
+.superpowers/
