@@ -25,3 +25,15 @@ export {
   GameRecordConflictError
 } from "./storage.js";
 export type { FileGameStoreOptions, GameStore } from "./storage.js";
+export { GameCoordinator } from "./coordinator.js";
+export type {
+  CoordinatorDependencies,
+  GameSnapshot,
+  Result
+} from "./coordinator.js";
+export type { GameCommand } from "./commands.js";
+export {
+  DEFAULT_SHUTDOWN_TIMEOUT_MS,
+  settleWithin,
+  SourceSlot
+} from "./replace-source.js";
