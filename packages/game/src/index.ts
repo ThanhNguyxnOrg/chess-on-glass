@@ -39,3 +39,18 @@ export {
 } from "./replace-source.js";
 export { CompositeResultSink, QueuedTextSink } from "./results.js";
 export type { QueuedTextSinkOptions, ResultSink } from "./results.js";
+export {
+  CorpusManifestError,
+  evaluateRecording,
+  validateCorpusManifest
+} from "./evaluation.js";
+export type {
+  CorpusManifest,
+  CorpusRecording,
+  CorpusSplit,
+  EvaluationMode,
+  EvaluationReport,
+  RecordingOutcome,
+  RecordingRunner,
+  TruthMove
+} from "./evaluation.js";
