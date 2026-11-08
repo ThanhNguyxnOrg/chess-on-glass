@@ -35,6 +35,15 @@ The direction is enforced by package manifests and review, not by a runtime mech
 - `npm run test:unit` — same suite, explicit package scope.
 - Native/real-engine/cloud tests are separate, explicitly labelled jobs added by later slices. A skipped native test must fail its release job; no silent skip in this base job.
 
+## Secret-storage contract to verify in the Windows/platform slice
+
+`PlatformServices.readSecret`/`writeSecret` are interfaces only in this slice; no unit test touches a real keychain. A later native contract test must prove, per OS:
+
+- Windows: Windows Credential Manager, persistent across process restart, per-user scope.
+- macOS: Keychain item, persistent across restart, correct access group.
+- Linux: Secret Service via the session bus; if only an in-memory store is available it must report non-persistent and must not be labelled persistent.
+- No plaintext file fallback may be introduced silently; a failed secret store surfaces an actionable error.
+
 ## Boundaries in this slice
 
 - No real camera, overlay, cloud provider, network device, WhatsApp, BlackHole or macOS service is implemented.
