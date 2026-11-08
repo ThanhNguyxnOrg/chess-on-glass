@@ -36,9 +36,29 @@ The original revision no longer exists in this repository: on 2026-11-08 the own
 | SHA-256 | `3054b16d2b2cfd263fc3bd2997c392cec6fb9f17b7bb1a9a0bdf22af4af79909` |
 | Rule | Preserve byte-for-byte; never regenerate, redraw or replace |
 
+## Local-core acceptance checkpoint (2026-11-08, plan 01 Task 14)
+
+- `node scripts/check-brand.mjs` passes: logo SHA-256 unchanged, workspace packages stay
+  `private` with no original-author or publisher claim, no runtime import reaches legacy `src/`,
+  and no dummy secret marker appears in runtime sources.
+- `npm run typecheck`, `npm run build`, `npm run test:unit` (27 files / 191 tests) and
+  `npm run eval -- --simulate` pass on the Windows reference machine (Node 26.3.0).
+- `npm run test:engine` fails closed: no approved Stockfish binary is installed and
+  `CHESSONGLASS_STOCKFISH` is unset. Real engine version/hash evidence is not recorded, and
+  `docs/rights/artifacts.json` remains `unverified`.
+- `docs/legacy-replacement.md` inventories every baseline `src/` file with
+  `removal-approved:false`. No legacy file was deleted, no history was rewritten, and nothing
+  was pushed, merged or published.
+- External distribution stays blocked until the evidence below exists; the local-core result
+  is not permission to distribute.
+
 ## Pending evidence
 
 - Written permission from `picklerpeej` (channel found: https://github.com/picklerpeej), or a documented clean-room provenance log.
 - Final license choice for the owner's new project.
 - Third-party notices for every shipped dependency and binary.
 - Artifact version/hash/provenance entries in `docs/rights/artifacts.json` (currently `unverified`).
+- An approved Stockfish binary whose version and SHA-256 are recorded, so `npm run test:engine`
+  can move from failing closed to passing.
+- Owner confirmation of attribution/permission evidence and local core parity before any legacy
+  deletion or publication.

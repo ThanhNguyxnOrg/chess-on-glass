@@ -1,84 +1,58 @@
-# chesshacker
+# ChessOnGlass
 
-Video-call a Mac on WhatsApp from Meta glasses, look at a chess game, and hear the best move.
-The Mac reads the board with a vision model, picks the move with Stockfish, and says it into
-the call. See [DESIGN.md](DESIGN.md) for the design and test results.
+ChessOnGlass is an international, cross-platform chess assistant. The goal is to watch a real
+board with a camera, track the game, suggest a move from a local engine, and present or speak
+the result — without requiring WhatsApp, macOS-only audio routing or a hosted backend.
 
-It's meant for friendly games where everyone at the board knows about it, not for rated or
-tournament play.
+**Status: foundation slice complete (2026-11-08).** The portable game core is implemented and
+tested; camera, dashboard, native speech and cloud vision arrive in later slices. See
+[DESIGN.md](DESIGN.md) for the architecture and [docs/architecture.md](docs/architecture.md)
+for the acceptance record.
 
-## Set up a Mac
+## What works today
 
-You need [Node.js](https://nodejs.org) 22 or newer (`brew install node`). Clone or download
-this repo, then from its folder:
+| Package | Responsibility |
+|---|---|
+| `@chessonglass/contracts` | Session/frame identity, bounded frame mailbox, observation types |
+| `@chessonglass/platform` | Paths, injected secret storage, bounded process execution, log redaction, aggregate artifacts, Stockfish-compatible UCI adapter |
+| `@chessonglass/chess` | Legal state/history/PGN, position candidates, observation-to-move matching with corroboration and promotion ambiguity |
+| `@chessonglass/perception` | Board-reader contract, strict observation parsing, optional local pre-filter |
+| `@chessonglass/game` | Single-writer coordinator with stale-result rejection, atomic resumable journal, shared cost ledger, result sinks, free-running evaluation |
 
-```sh
-npm install              # 1. install and build
-npx chesshacker setup    # 2. downloads Stockfish, asks for keys, checks everything
-```
+191 unit and contract tests cover these packages.
 
-You'll need an OpenAI API key (the default model is `gpt-6.1-sol`). A Jev key from TypeSafe is
-optional and makes games cheaper. Also install WhatsApp from the Mac App Store and
-[BlackHole 2ch](https://existential.audio/blackhole/) (`brew install blackhole-2ch`), and give
-your terminal app Screen Recording permission: `setup` opens the setting and `doctor` says
-exactly what's still missing.
+## Run the core locally
 
-Keys are kept in your login Keychain. If you saved them with the earlier Python version, macOS
-asks once whether `security` may read them: click Always Allow.
-
-Then check a real call once:
+Requires Node.js 24 LTS or newer.
 
 ```sh
-npx chesshacker test-call
+npm install
+npm run typecheck
+npm run build
+npm run test:unit
+node scripts/check-brand.mjs
+npm run eval -- --simulate
 ```
 
-## Play
+`npm run eval -- --simulate` prints one deterministic, oracle-free evaluation run from a
+built-in fixture. Real recordings need a separately approved model and hardware run and are
+never started by the normal suite.
 
-1. From the glasses, video-call this Mac's WhatsApp, answer it here, and double-tap the
-   glasses' capture button to share their view. In the call's ⋯ menu, set the microphone to
-   BlackHole 2ch.
-2. Start chesshacker with your color:
+`npm run test:engine` is a release-only gate. It needs `CHESSONGLASS_STOCKFISH` to point at an
+approved Stockfish binary whose version and SHA-256 match `docs/rights/artifacts.json`; without
+one it fails closed instead of skipping.
 
-   ```sh
-   npx chesshacker run --color white
-   npx chesshacker run --color black --fen "<position>"   # joining a game in progress
-   ```
+## Boundaries in this slice
 
-3. Look at the board. You'll hear "Ready", then the best move after each of your opponent's
-   moves. The command center opens in your browser.
-
-Useful options: `--model claude-opus-5-5`, `--no-gate` (skip the Jev pre-check),
-`--max-cost 5`, `--speak speakers` (out of the Mac instead of into the call), and
-`--video FILE` to play a recording through the whole loop without a call.
-`npx chesshacker windows` lists WhatsApp's windows if it watches the wrong one, or can't find
-the call because WhatsApp shows it inside its main window: pass the right one with `--window ID`.
-
-## Overlay video (for OBS)
-
-While a game runs, `http://127.0.0.1:8000/overlay` shows the call's video with an overlay: a
-"tactical map" of the position in the corner, and the suggested move drawn onto the real board
-(outline, highlighted squares, arrow, label). In OBS, add a **Browser Source** with that URL and
-the video's size (e.g. 1080×1440). The command center links to it too.
-
-To record or stream it, add `--overlay-out`: a file (`overlay.mp4`) or a stream URL
-(`rtmp://…/live/KEY`, or `udp://127.0.0.1:1234` for an OBS Media Source).
-
-The board is found by asking the vision model for its corners every `--locate-every` seconds
-(5), only while the overlay is watched or recorded. That counts toward `--max-cost`, and each
-answer takes 10–20 s, so the overlay lags when the head moves. `--locate-model` picks another
-model for it.
-
-## Develop
-
-```sh
-npm test                 # vitest
-npm run typecheck        # tsc, strict, over src, tests and evals
-npm run build            # dist/ (npm install runs this too)
-npm run eval -- --simulate                                           # the matcher, free
-npm run eval -- fixtures/example2-black.mov --pgn fixtures/example2.pgn --color black --every 1
-```
-
-`npm run eval -- --help` lists the options (strategy, model, `--gate`, frame spacing,
-`--max-cost`). Model answers are cached in `evals/.cache`, so re-scoring is free. Recordings
-go in `fixtures/` next to their PGN (a `[FEN]` header for games joined midway); videos are
-gitignored. After changing `src/`, run `npm run build` before using `npx chesshacker`.
+- No camera or window capture, no browser dashboard, no overlay, no real speech output.
+- No real vision-provider call: every AI path is exercised with fakes, and no paid evaluation
+  runs in CI.
+- No WhatsApp, BlackHole, macOS-only service or hosted backend is part of the new runtime.
+- Nothing is published. The `@chessonglass/*` scope is provisional and every package stays
+  `private`.
+- External distribution is blocked until permission/attribution evidence and the final license
+  are decided; see [docs/rights/provenance.md](docs/rights/provenance.md).
+- The legacy implementation is retained as reference only:
+  [docs/legacy-replacement.md](docs/legacy-replacement.md) lists every original file and its
+  replacement status. Nothing is approved for removal.
+- `asset/logo.png` is preserved byte-for-byte; `scripts/check-brand.mjs` verifies its SHA-256.
