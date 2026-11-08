@@ -28,6 +28,7 @@ import {
   settleWithin,
   SourceSlot
 } from "./replace-source.js";
+import type { ResultSink } from "./results.js";
 import type { GameStore } from "./storage.js";
 
 /** One publishable outcome. UI, audio and file sinks each select their part. */
@@ -54,10 +55,7 @@ export type CoordinatorDependencies = {
   advisor: Advisor;
   store: GameStore;
   ledger: CostLedger;
-  sink: {
-    publish(result: Result): Promise<void>;
-    clear?(context?: RequestContext): void;
-  };
+  sink: ResultSink;
   /** Injectable clock for deterministic freshness tests. */
   now?: () => number;
   /** Overall bound for close/source replacement, default 2 s. */
@@ -260,7 +258,7 @@ export class GameCoordinator {
     }
     this.closed = true;
     this.invalidatePending("coordinator closed");
-    this.deps.sink.clear?.();
+    this.deps.sink.clear();
 
     const pump = this.pump;
     this.detachPump();
@@ -773,7 +771,7 @@ export class GameCoordinator {
       controller.abort(reason);
     }
     this.requests.clear();
-    this.deps.sink.clear?.(this.lastPublishedContext ?? undefined);
+    this.deps.sink.clear(this.lastPublishedContext ?? undefined);
     this.lastPublishedContext = null;
   }
 

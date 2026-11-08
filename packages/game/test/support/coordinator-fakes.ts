@@ -14,6 +14,7 @@ import {
 import {
   CostLedger,
   GameCoordinator,
+  type CoordinatorDependencies,
   type GameRecord,
   type GameStore,
   type Result,
@@ -303,6 +304,7 @@ export class RecordingSink {
   readonly results: Result[] = [];
   readonly clears: Array<RequestContext | undefined> = [];
   failNextPublish = false;
+  closeCalls = 0;
 
   async publish(result: Result): Promise<void> {
     if (this.failNextPublish) {
@@ -314,6 +316,10 @@ export class RecordingSink {
 
   clear(context?: RequestContext): void {
     this.clears.push(context);
+  }
+
+  async close(): Promise<void> {
+    this.closeCalls += 1;
   }
 }
 
@@ -327,11 +333,14 @@ export type Harness = {
   readonly coordinator: GameCoordinator;
 };
 
-export function createHarness(options: {
-  now?: () => number;
-  shutdownTimeoutMs?: number;
-  ledger?: CostLedger;
-} = {}): Harness {
+export function createHarness(
+  options: {
+    now?: () => number;
+    shutdownTimeoutMs?: number;
+    ledger?: CostLedger;
+    sink?: CoordinatorDependencies["sink"];
+  } = {}
+): Harness {
   const source = new ManualSource();
   const reader = new ManualReader();
   const advisor = new ManualAdvisor();
@@ -343,7 +352,7 @@ export function createHarness(options: {
     advisor,
     store,
     ledger,
-    sink,
+    sink: options.sink ?? sink,
     ...(options.now === undefined ? {} : { now: options.now }),
     ...(options.shutdownTimeoutMs === undefined
       ? {}

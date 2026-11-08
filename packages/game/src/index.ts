@@ -37,3 +37,5 @@ export {
   settleWithin,
   SourceSlot
 } from "./replace-source.js";
+export { CompositeResultSink, QueuedTextSink } from "./results.js";
+export type { QueuedTextSinkOptions, ResultSink } from "./results.js";
