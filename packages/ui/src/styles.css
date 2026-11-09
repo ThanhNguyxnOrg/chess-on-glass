@@ -1,0 +1,32 @@
+:root {
+  --cog-bg: #10151d;
+  --cog-surface: #1a222e;
+  --cog-text: #edf1f7;
+  --cog-muted: #9aa7b8;
+  --cog-accent: #d8a657;
+  color-scheme: dark;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  background: var(--cog-bg);
+  color: var(--cog-text);
+  font-family: "Segoe UI", system-ui, sans-serif;
+}
+
+#app {
+  max-width: 72rem;
+  margin: 0 auto;
+  padding: 1.5rem;
+}
+
+h1 {
+  font-size: 1.5rem;
+  letter-spacing: 0.02em;
+  color: var(--cog-accent);
+}
