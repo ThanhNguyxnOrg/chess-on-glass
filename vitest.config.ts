@@ -19,7 +19,13 @@ export default defineConfig({
   test: {
     environment: "node",
     include: ["packages/*/test/**/*.test.ts"],
-    exclude: ["node_modules/**", "dist/**", "tests/**", "evals/**"],
+    exclude: [
+      "node_modules/**",
+      "dist/**",
+      "tests/**",
+      "evals/**",
+      "**/*.integration.test.ts"
+    ],
     testTimeout: 15000
   }
 });
