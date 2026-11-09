@@ -138,7 +138,7 @@ export class WebcamUploader {
 
 - [ ] **Step 2: Run RED and implement backend validation**
 
-  Run source/auth tests; expect missing implementation. Start/stop routes allocate opaque capture session/source IDs. Upload headers carry session, source, decimal sequence, wall timestamp, request ID, position version and optional reference sequence; validate all against active state. Read at most 5 MiB and Sharp-decode/re-encode with a 12 MP limit. `close():Promise<void>` releases mailbox waiters.
+  Run source/auth tests; expect missing implementation. Start/stop routes allocate opaque capture session/source IDs and pass the allocated session ID to `GameCoordinator.start`/`replaceSource` so uploaded frames are bound to the active game session (a frame stamped with another session is ignored and the misbinding is reported). Upload headers carry session, source, decimal sequence, wall timestamp, request ID, position version and optional reference sequence; validate all against active state. Read at most 5 MiB and Sharp-decode/re-encode with a 12 MP limit. `close():Promise<void>` releases mailbox waiters.
 
 - [ ] **Step 3: Implement explicit browser capture**
 
@@ -324,7 +324,7 @@ export class WindowsApplication {
 
 - [ ] **Step 2: Implement runtime using actual core contracts**
 
-  Pump `source.next(signal)` into `GameCoordinator`; use `dispatch` for commands and `replaceSource` for lifecycle changes. Do not add a second `command({type:"frame"})` game API. Source and local HTTP sessions have separate IDs/lifecycles. Implement snapshot/events/latest-frame/settings/secrets/doctor/source routes using Task 2 auth. Authorized SSE uses `fetch`, not `EventSource` with token query.
+  Pump `source.next(signal)` into `GameCoordinator`; use `dispatch` for commands and `replaceSource` for lifecycle changes. Do not add a second `command({type:"frame"})` game API. Generate one `newSessionId()` per source lifetime, pass it to the source constructor and to `GameCoordinator.start`/`replaceSource`, and keep source and local HTTP sessions as separate IDs/lifecycles. Implement snapshot/events/latest-frame/settings/secrets/doctor/source routes using Task 2 auth. Authorized SSE uses `fetch`, not `EventSource` with token query.
 
 - [ ] **Step 3: Implement CLI and shutdown**
 

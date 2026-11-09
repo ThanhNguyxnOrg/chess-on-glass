@@ -22,7 +22,7 @@ import { toReadFailure, type BoardReader, type ReadFailure, type ReadResult } fr
 import type { Advisor } from "@chessonglass/platform";
 import type { CostLedger } from "./budget.js";
 import type { GameCommand } from "./commands.js";
-import type { GameRecord } from "./journal.js";
+import { isCanonicalSessionId, type GameRecord } from "./journal.js";
 import {
   DEFAULT_SHUTDOWN_TIMEOUT_MS,
   settleWithin,
@@ -64,6 +64,27 @@ export type CoordinatorDependencies = {
 
 const EVIDENCE_LIMIT = 4;
 const BUDGET_EXHAUSTED = "estimated budget exhausted; paid work is paused";
+const FOREIGN_SESSION_ERROR = "frame source is not bound to the active session";
+const FOREIGN_FRAME_LIMIT = 5;
+
+function requireCanonicalSession(sessionId: unknown): SessionId {
+  if (!isCanonicalSessionId(sessionId)) {
+    throw new TypeError("sessionId must be a canonical lowercase UUID");
+  }
+  return sessionId;
+}
+
+function sameBytes(left: Uint8Array, right: Uint8Array): boolean {
+  if (left.byteLength !== right.byteLength) {
+    return false;
+  }
+  for (let index = 0; index < left.byteLength; index += 1) {
+    if (left[index] !== right[index]) {
+      return false;
+    }
+  }
+  return true;
+}
 
 type ActiveRequest = {
   readonly context: RequestContext;
@@ -150,6 +171,8 @@ export class GameCoordinator {
   private activeReadToken: symbol | null = null;
   private pumpController: AbortController | null = null;
   private pump: Promise<void> | null = null;
+  private foreignFrames = 0;
+  private suggestionRequestId: string | null = null;
 
   constructor(dependencies: CoordinatorDependencies) {
     this.deps = dependencies;
@@ -161,14 +184,22 @@ export class GameCoordinator {
     }
   }
 
-  /** Begin a session and resolve after the initial state is published. */
-  async start(source: FrameSource, initial: GamePosition | null): Promise<void> {
+  /**
+   * Begin a session and resolve after the initial state is published. The
+   * caller may supply the session ID so the frame source can stamp its frames
+   * with it; otherwise a fresh canonical ID is generated.
+   */
+  async start(
+    source: FrameSource,
+    initial: GamePosition | null,
+    sessionId: SessionId = newSessionId()
+  ): Promise<void> {
     this.requireOpen();
     if (this.started) {
       throw new Error("coordinator has already started");
     }
     this.started = true;
-    this.sessionId = newSessionId();
+    this.sessionId = requireCanonicalSession(sessionId);
     this.applyInitialState(initial);
     this.attachPump(source);
     await this.persist();
@@ -181,15 +212,20 @@ export class GameCoordinator {
   /**
    * Swap the active source without trusting anything from the old lifecycle:
    * the session rotates, pending work is aborted and the previous source is
-   * closed only after the replacement is active.
+   * closed only after the replacement is active. The new session ID may be
+   * caller-provided so the replacement source can stamp its frames.
    */
-  async replaceSource(source: FrameSource, initial: GamePosition | null): Promise<void> {
+  async replaceSource(
+    source: FrameSource,
+    initial: GamePosition | null,
+    sessionId: SessionId = newSessionId()
+  ): Promise<void> {
     this.requireStarted();
     const previous = this.sourceSlot.current();
     const pump = this.pump;
     this.detachPump();
     this.invalidatePending("source replaced");
-    this.sessionId = newSessionId();
+    this.sessionId = requireCanonicalSession(sessionId);
     this.applyInitialState(initial);
     this.attachPump(source);
     await this.persist();
@@ -300,6 +336,8 @@ export class GameCoordinator {
     this.lastSequences.clear();
     this.createdAtWallMs = null;
     this.positionVersion = 0;
+    this.foreignFrames = 0;
+    this.suggestionRequestId = null;
 
     if (initial === null) {
       this.position = null;
@@ -352,9 +390,23 @@ export class GameCoordinator {
         await this.markLost();
         return;
       }
-      if (this.sourceSlot.current() !== source || frame.sessionId !== this.sessionId) {
+      if (this.sourceSlot.current() !== source) {
         continue;
       }
+      if (frame.sessionId !== this.sessionId) {
+        // A misbound source would otherwise leave a "ready" session that
+        // silently never reads; surface it after a few frames.
+        this.foreignFrames += 1;
+        if (
+          this.foreignFrames >= FOREIGN_FRAME_LIMIT &&
+          this.error !== FOREIGN_SESSION_ERROR
+        ) {
+          this.error = FOREIGN_SESSION_ERROR;
+          this.emitSnapshot();
+        }
+        continue;
+      }
+      this.foreignFrames = 0;
 
       const last = this.lastSequences.get(frame.sourceId);
       if (last !== undefined && frame.sequence <= last) {
@@ -363,8 +415,22 @@ export class GameCoordinator {
       this.lastSequences.set(frame.sourceId, frame.sequence);
 
       const previous = this.lastFrame;
+      if (
+        previous !== null &&
+        previous.sessionId === frame.sessionId &&
+        previous.sourceId === frame.sourceId &&
+        sameBytes(previous.bytes, frame.bytes)
+      ) {
+        // Frozen frames (identical bytes under a new sequence) are not fresh
+        // evidence and must not cause a paid read or corroborate a move.
+        continue;
+      }
+
       this.lastFrame = frame;
       this.lastFrameReceivedAtWallMs = this.outputClock();
+      if (this.error === FOREIGN_SESSION_ERROR) {
+        this.error = null;
+      }
       this.emitSnapshot();
 
       if (!this.canRead()) {
@@ -528,9 +594,18 @@ export class GameCoordinator {
   }
 
   private maybeSuggest(): void {
-    if (this.status === "ready" && this.suggestion === null) {
-      void this.requestSuggestion();
+    if (this.status !== "ready" || this.suggestion !== null) {
+      return;
     }
+    // A live request already covers this position; interleaved commands must
+    // not double-charge the engine or announce the suggestion twice.
+    if (
+      this.suggestionRequestId !== null &&
+      this.requests.has(this.suggestionRequestId)
+    ) {
+      return;
+    }
+    void this.requestSuggestion();
   }
 
   private async requestSuggestion(): Promise<void> {
@@ -550,6 +625,7 @@ export class GameCoordinator {
       }
 
       const request = this.beginRequest(null);
+      this.suggestionRequestId = request.context.requestId;
       let best: { uci: string } | null = null;
       let failed = false;
       try {
@@ -565,6 +641,9 @@ export class GameCoordinator {
         failed = this.isLive(request);
       } finally {
         this.endRequest(request.context.requestId);
+        if (this.suggestionRequestId === request.context.requestId) {
+          this.suggestionRequestId = null;
+        }
       }
 
       if (failed) {
@@ -771,6 +850,7 @@ export class GameCoordinator {
       controller.abort(reason);
     }
     this.requests.clear();
+    this.suggestionRequestId = null;
     this.deps.sink.clear(this.lastPublishedContext ?? undefined);
     this.lastPublishedContext = null;
   }

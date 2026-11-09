@@ -64,8 +64,12 @@ interfaces; there is no `macos.ts`-style platform branch in the core.
 
 ## Sessions and persistence
 
-- A session is an opaque UUID. Frames carry it, so frames from a replaced source cannot
-  contribute to the new session even if a provider ignores cancellation.
+- A session is an opaque UUID. `GameCoordinator.start`/`replaceSource` accept a caller-provided
+  canonical session ID so a frame source can stamp its frames with it; a fresh ID is generated
+  when the caller does not bind one. Frames from another session are ignored, and a source that
+  keeps sending them is reported instead of silently leaving a "ready" session dead.
+- Duplicate or out-of-order sequences are dropped, and consecutive byte-identical frames are
+  treated as frozen: they cause no paid read and cannot corroborate a move.
 - `FileGameStore` maps canonical session IDs to hashed fixed filenames, writes a sibling
   temporary file, flushes, closes and renames it over the previous record. Partial or forged
   JSON is never loaded as valid state.

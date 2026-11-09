@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 import { ChessState } from "@chessonglass/chess";
-import { newSourceId, type GamePosition } from "@chessonglass/contracts";
+import {
+  newSessionId,
+  newSourceId,
+  type GamePosition,
+  type SessionId
+} from "@chessonglass/contracts";
 import {
   CostLedger,
   SourceSlot,
@@ -11,6 +16,7 @@ import {
   fenAfter,
   flushTurns,
   makeFrame,
+  ManualSource,
   observationFor,
   positionAfter,
   squareIndex,
@@ -463,6 +469,78 @@ describe("GameCoordinator normal play", () => {
     expect(h.source.closeCalls).toBe(1);
 
     await expect(h.coordinator.dispatch({ type: "pause" })).rejects.toThrow(/closed/i);
+  });
+
+  it("binds a caller-provided session id so a frame source can stamp frames", async () => {
+    const h = createHarness();
+    const sessionId = newSessionId();
+    await h.coordinator.start(h.source, startPosition(), sessionId);
+    expect(h.coordinator.snapshot().sessionId).toBe(sessionId);
+
+    h.source.push(makeFrame(sessionId, newSourceId(), 1n));
+    await until(() => h.reader.calls.length === 1, "read with a bound session");
+
+    const replacementSession = newSessionId();
+    await h.coordinator.replaceSource(
+      new ManualSource(),
+      startPosition(),
+      replacementSession
+    );
+    expect(h.coordinator.snapshot().sessionId).toBe(replacementSession);
+
+    await h.coordinator.close();
+  });
+
+  it("rejects a non-canonical session id", async () => {
+    const h = createHarness();
+    await expect(
+      h.coordinator.start(h.source, startPosition(), "not-a-uuid" as SessionId)
+    ).rejects.toThrow(TypeError);
+    await h.coordinator.close();
+  });
+
+  it("reports a frame source that is not bound to the active session", async () => {
+    const h = createHarness();
+    await h.coordinator.start(h.source, startPosition());
+    const wrongSession = newSessionId();
+    for (let index = 1; index <= 5; index += 1) {
+      h.source.push(makeFrame(wrongSession, newSourceId(), BigInt(index)));
+    }
+
+    await until(() => h.coordinator.snapshot().error !== null, "mismatch reported");
+    expect(h.coordinator.snapshot().error).toMatch(/session/i);
+    expect(h.reader.calls).toHaveLength(0);
+
+    await h.coordinator.close();
+  });
+
+  it("does not start duplicate engine requests for one position", async () => {
+    const h = createHarness();
+    await h.coordinator.start(h.source, startPosition());
+    await until(() => h.advisor.calls.length === 1, "initial suggestion request");
+    h.advisor.resolveBest(0, "e2e4");
+    await until(() => h.coordinator.snapshot().suggestion !== null, "initial suggestion");
+
+    await h.coordinator.dispatch({ type: "manual-move", uci: "e2e4" });
+    await until(() => h.advisor.calls.length === 2, "suggestion for the reply");
+    await h.coordinator.dispatch({ type: "manual-move", uci: "e7e5" });
+    await until(() => h.advisor.calls.length === 3, "suggestion after the second move");
+
+    // Interleaved commands reach maybeSuggest with no current suggestion; only
+    // one engine request may exist for the restored position.
+    const firstUndo = h.coordinator.dispatch({ type: "undo" });
+    const secondUndo = h.coordinator.dispatch({ type: "undo" });
+    await Promise.all([firstUndo, secondUndo]);
+    await flushTurns();
+    expect(h.advisor.calls.length).toBe(4);
+
+    h.advisor.resolveBest(3, "g1f3");
+    await until(
+      () => h.coordinator.snapshot().suggestion?.moveUci === "g1f3",
+      "restored suggestion"
+    );
+
+    await h.coordinator.close();
   });
 });
 

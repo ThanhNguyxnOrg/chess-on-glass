@@ -252,6 +252,37 @@ describe("GameCoordinator stale-work rejection", () => {
     await h.coordinator.close();
   });
 
+  it("frozen byte-identical frames cannot add confidence", async () => {
+    const h = createHarness();
+    await h.coordinator.start(h.source, startPosition());
+    const sessionId = h.coordinator.snapshot().sessionId;
+    const sourceId = newSourceId();
+    const observed = fenAfter(["e2e4"]);
+    const frozen = new Uint8Array([7, 7, 7, 7]);
+
+    h.source.push(makeFrame(sessionId, sourceId, 1n, frozen));
+    await until(() => h.reader.calls.length === 1, "first read");
+    h.reader.settleWithMove(0, observed);
+    await until(() => h.coordinator.snapshot().status === "waiting", "waiting");
+
+    // Same bytes under a new sequence number is a frozen source, not fresh
+    // evidence; it must not be read or corroborate the move.
+    h.source.push(makeFrame(sessionId, sourceId, 2n, frozen));
+    await flushTurns();
+    expect(h.reader.calls).toHaveLength(1);
+    expect(h.coordinator.snapshot().position?.history).toEqual([]);
+
+    h.source.push(makeFrame(sessionId, sourceId, 3n, new Uint8Array([8, 8, 8, 8])));
+    await until(() => h.reader.calls.length === 2, "fresh read");
+    h.reader.settleWithMove(1, observed);
+    await until(
+      () => h.coordinator.snapshot().position?.history.length === 1,
+      "move committed"
+    );
+
+    await h.coordinator.close();
+  });
+
   it("marks the session lost when the frame source ends", async () => {
     const h = createHarness();
     await h.coordinator.start(h.source, startPosition());
