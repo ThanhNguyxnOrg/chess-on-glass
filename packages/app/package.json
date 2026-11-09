@@ -15,7 +15,8 @@
     "dist"
   ],
   "dependencies": {
-    "@chessonglass/contracts": "0.0.0"
+    "@chessonglass/contracts": "0.0.0",
+    "sharp": "0.35.5"
   },
   "scripts": {
     "build": "tsc -b tsconfig.json",

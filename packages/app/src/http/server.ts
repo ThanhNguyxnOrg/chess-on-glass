@@ -97,11 +97,7 @@ function acceptsEventStream(request: IncomingMessage): boolean {
   return accept.includes("text/event-stream");
 }
 
-function writeJsonError(
-  request: IncomingMessage,
-  response: ServerResponse,
-  error: HttpError
-): void {
+function writeJsonError(response: ServerResponse, error: HttpError): void {
   const payload = JSON.stringify(error.body);
   const headers: Record<string, string | number> = {
     ...SECURITY_HEADERS,
@@ -112,11 +108,9 @@ function writeJsonError(
     headers.Connection = "close";
   }
   response.writeHead(error.status, headers);
-  response.end(payload, () => {
-    if (error.closeConnection) {
-      request.socket.end();
-    }
-  });
+  // The Connection: close header ends the socket after this response; the
+  // request stream stays drained so the client can finish its upload.
+  response.end(payload);
 }
 
 function writeBytes(
@@ -336,7 +330,6 @@ export async function startDashboardServer(options: {
         return;
       }
       writeJsonError(
-        request,
         response,
         error instanceof HttpError
           ? error
