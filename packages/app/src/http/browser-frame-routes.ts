@@ -8,7 +8,7 @@ import { parseBrowserFrameHeaders } from "./browser-frame-metadata.js";
 import { HttpError, badRequest } from "./errors.js";
 import {
   FRAME_BODY_LIMIT,
-  type BodyPolicy,
+  type ComposableRoutes,
   type DashboardRequest,
   type DashboardResponse
 } from "./server.js";
@@ -33,13 +33,6 @@ export type BrowserFrameRoutesOptions = {
   now?(): number;
   start?(): Promise<{ sessionId: SessionId; sourceId: SourceId }>;
   stop?(): Promise<void>;
-};
-
-export type ComposableRoutes = {
-  handle(request: DashboardRequest): Promise<DashboardResponse | null>;
-  bodyPolicy(
-    request: Readonly<{ method: string; path: string }>
-  ): BodyPolicy | null;
 };
 
 async function decodeJpegWithSharp(bytes: Uint8Array): Promise<Uint8Array> {

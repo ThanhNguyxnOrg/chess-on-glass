@@ -1,0 +1,48 @@
+{
+  "schemaVersion": 1,
+  "selectedAt": "2026-11-09",
+  "status": "selected",
+  "backend": {
+    "package": "@screen-capture/node",
+    "version": "1.1.0",
+    "license": "MIT",
+    "integrity": "sha512-LZj0+WWOjLOeq9UI8ie8cVWYydUMHwpfSpnWlK7GWST1bCTDAS3+lSsan8IEgbD+PMrDXFbVXhhbL5rJtS9YvA==",
+    "tarballShasum": "238983165947608452818d9ac20d2c5b523067f7",
+    "repository": "https://github.com/tux-tn/node-screen-capture",
+    "underlyingWindowsCrate": "windows-capture 2.0.0",
+    "platformBinary": {
+      "package": "@screen-capture/node-win32-x64-msvc",
+      "version": "1.1.0",
+      "file": "screen_capture.win32-x64-msvc.node",
+      "sha256": "c97a723643f3f9b4407a025c1a1ed61aba75a1757cbb5be3f7589bf3671a0bb1"
+    }
+  },
+  "spike": {
+    "date": "2026-11-09",
+    "host": "Windows 11 Enterprise 10.0.26300 (Windows x64)",
+    "runtime": "Node 26.3.0",
+    "script": "packages/app/scripts/smoke-screen-capture.ts",
+    "support": {
+      "isSupported": true,
+      "graphicsCapture": true,
+      "cursorSettings": true,
+      "borderSettings": true,
+      "secondaryWindows": true,
+      "minimumUpdateInterval": true,
+      "dirtyRegions": true
+    },
+    "result": {
+      "distinctFrames": 2,
+      "frameWidth": 1477,
+      "frameHeight": 977,
+      "closedCleanly": true,
+      "durationMs": 798
+    }
+  },
+  "limitations": [
+    "No claim for minimized, occluded or RDP windows; only a normally visible consented window was captured.",
+    "The native picker (usePicker) is not exercised unattended; the dashboard lists windows with enumerateWindows and requires an explicit Start.",
+    "Requires Windows 10 1903 or newer and the MSVC runtime.",
+    "Window titles are untrusted data and never become paths or commands."
+  ]
+}

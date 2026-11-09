@@ -75,6 +75,17 @@ export interface DashboardRoutes {
   stream?(request: DashboardRequest, responder: StreamResponder): boolean;
 }
 
+/**
+ * One composable slice of the dashboard API. `handle` returns null when the
+ * path is not its own; the runtime composes the slices and answers 404.
+ */
+export type ComposableRoutes = {
+  handle(request: DashboardRequest): Promise<DashboardResponse | null>;
+  bodyPolicy(
+    request: Readonly<{ method: string; path: string }>
+  ): BodyPolicy | null;
+};
+
 export type DashboardServer = Readonly<{
   url: string;
   launchUrl: string;
