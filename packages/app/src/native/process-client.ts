@@ -103,6 +103,9 @@ export function spawnHelperProcess(
   if (child.stdin === null) {
     throw new Error("helper process did not provide a stdin pipe");
   }
+  // ENOENT and early exits surface asynchronously on the pipes; keep them
+  // non-fatal by default so a caller's own handler decides the outcome.
+  child.stdin.on("error", () => undefined);
   const observed = observe(child, options.stderrLimitBytes ?? DEFAULT_STDERR_LIMIT);
   return {
     stdin: child.stdin,

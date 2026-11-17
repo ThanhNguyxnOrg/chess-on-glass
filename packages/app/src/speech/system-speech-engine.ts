@@ -201,6 +201,8 @@ export class SystemSpeechEngine implements SpeechEngine {
 
       const onAbort = (): void => finish(abortError());
 
+      handle.stdin.on("error", () => finish(new SpeechUnavailableError()));
+      handle.stdout.on("error", () => finish(new SpeechUnavailableError()));
       handle.stdout.on("data", (chunk: Buffer) => {
         if (bytes >= MAX_OUTPUT_BYTES) {
           return;

@@ -15,9 +15,11 @@
     "dist"
   ],
   "dependencies": {
+    "@anthropic-ai/sdk": "1.7.0",
     "@chessonglass/contracts": "0.0.0",
     "@chessonglass/game": "0.0.0",
     "@screen-capture/node": "1.1.0",
+    "openai": "7.55.0",
     "sharp": "0.35.5"
   },
   "scripts": {

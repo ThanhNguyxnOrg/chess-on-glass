@@ -112,10 +112,25 @@ class ReplaySlot {
   }
 }
 
-function validateReplayOptions(options: ReplayOptions): Required<ReplayOptions> {
-  if (typeof options.path !== "string" || options.path.trim() === "") {
+/**
+ * FFmpeg treats the `-i` value as an input URL, so only local file forms are
+ * accepted: a Windows drive path, a UNC path, or a relative path. Scheme-like
+ * values (`http:`, `concat:`, `subfile:`) and stdin (`-`) are rejected.
+ */
+function assertLocalReplayPath(path: string): void {
+  if (typeof path !== "string" || path.trim() === "") {
     throw new TypeError("replay path must be a non-empty string");
   }
+  const isWindowsDrive = /^[A-Za-z]:[\\/]/.test(path);
+  if (path === "-" || (/^[A-Za-z][A-Za-z0-9+.-]*:/.test(path) && !isWindowsDrive)) {
+    throw new RangeError(
+      "replay path must be a local file path, not a URL or stream"
+    );
+  }
+}
+
+function validateReplayOptions(options: ReplayOptions): Required<ReplayOptions> {
+  assertLocalReplayPath(options.path);
   if (typeof options.ffmpegPath !== "string" || options.ffmpegPath.trim() === "") {
     throw new TypeError("ffmpeg path must be a non-empty string");
   }
@@ -146,6 +161,8 @@ function replayArgs(options: Required<ReplayOptions>): string[] {
     "error",
     "-readrate",
     String(options.speed),
+    "-protocol_whitelist",
+    "file",
     "-i",
     options.path,
     "-vf",

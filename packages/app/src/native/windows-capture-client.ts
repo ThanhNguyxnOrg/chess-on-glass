@@ -188,10 +188,14 @@ export class WindowsCaptureClient implements WindowsCaptureBackend {
     targetId: string;
     fps?: number;
   }): Promise<WindowsScreenSource> {
-    const handle = Number(options.targetId);
-    if (!Number.isSafeInteger(handle)) {
+    // Start must only accept an enumerated, consented target; numeric
+    // aliases like "0x10" or " 16" are not opaque ids.
+    const targets = await this.listTargets(new AbortController().signal);
+    const target = targets.find((candidate) => candidate.id === options.targetId);
+    if (target === undefined) {
       throw new Error("unknown capture target");
     }
+    const handle = Number(target.id);
     const fps = options.fps ?? DEFAULT_FPS;
     const interval = Math.max(100, Math.round(1000 / Math.min(10, Math.max(1, fps))));
     const session = this.createSession(handle, interval);

@@ -61,7 +61,6 @@ export function createBrowserFrameRoutes(
 ): ComposableRoutes {
   const decode = options.decodeJpeg ?? decodeJpegWithSharp;
   const now = options.now ?? (() => performance.now());
-  let lastAcceptedSequence: bigint | null = null;
 
   return {
     bodyPolicy(request) {
@@ -126,12 +125,9 @@ export function createBrowserFrameRoutes(
       if (headers.positionVersion !== target.positionVersion) {
         throw new HttpError(409, "stale_position", "frame position version is stale");
       }
-      if (
-        lastAcceptedSequence !== null &&
-        headers.sequence <= lastAcceptedSequence
-      ) {
-        throw new HttpError(409, "stale_sequence", "duplicate or out-of-order frame");
-      }
+      // Sequence ordering lives in the source mailbox, which tracks it per
+      // (session, source); a per-route global mark would reject a new source
+      // that legitimately restarts at sequence 1.
       if (request.body === null || request.body.byteLength === 0) {
         throw badRequest("frame body is required");
       }
@@ -163,7 +159,6 @@ export function createBrowserFrameRoutes(
 
       switch (status) {
         case "accepted":
-          lastAcceptedSequence = headers.sequence;
           return {
             status: 202,
             json: { accepted: true, receivedAtMonotonicMs }

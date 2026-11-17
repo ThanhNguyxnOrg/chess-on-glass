@@ -286,6 +286,35 @@ describe("browser frame upload boundary", () => {
     expect(frame?.mimeType).toBe("image/jpeg");
   });
 
+  it("accepts sequence 1 from a replacement source after a longer previous run", async () => {
+    const accepted = await send({
+      port: port(),
+      method: "POST",
+      path: "/api/source/browser/frame",
+      headers: frameHeaders({ sequence: 5n }),
+      body: JPEG
+    });
+    expect(accepted.status).toBe(202);
+
+    const nextSession = newSessionId();
+    const nextSource = new BrowserFrameSource(nextSession, newSourceId());
+    sessionId = nextSession;
+    sourceId = nextSource.sourceId;
+    source = nextSource;
+
+    const fresh = await send({
+      port: port(),
+      method: "POST",
+      path: "/api/source/browser/frame",
+      headers: frameHeaders({ sequence: 1n }),
+      body: JPEG
+    });
+    expect(fresh.status).toBe(202);
+
+    const frame = await source.next(new AbortController().signal);
+    expect(frame?.sequence).toBe(1n);
+  });
+
   it("validates and re-encodes real JPEGs with the default sharp decoder", async () => {
     const { default: sharp } = await import("sharp");
     const realJpeg = await sharp({

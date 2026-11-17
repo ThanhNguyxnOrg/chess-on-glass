@@ -83,6 +83,9 @@ describe("FfmpegReplaySource", () => {
       "C:\\recordings\\game.mp4"
     );
     expect(h.args[0]).toContain("image2pipe");
+    const whitelistIndex = h.args[0]!.indexOf("-protocol_whitelist");
+    expect(whitelistIndex).toBeGreaterThan(-1);
+    expect(h.args[0]![whitelistIndex + 1]).toBe("file");
 
     const first = await source.next(new AbortController().signal);
     expect(first?.sequence).toBe(1n);
@@ -164,6 +167,17 @@ describe("FfmpegReplaySource", () => {
       await expect(
         FfmpegReplaySource.open({ ...replayOptions(), fps }, h.dependencies)
       ).rejects.toThrow(/fps/i);
+    }
+    for (const path of [
+      "http://example.com/game.mp4",
+      "https://example.com/game.mp4",
+      "concat:a.mp4|b.mp4",
+      "subfile:secret.txt",
+      "-"
+    ]) {
+      await expect(
+        FfmpegReplaySource.open({ ...replayOptions(), path }, h.dependencies)
+      ).rejects.toThrow(/local file/i);
     }
   });
 });

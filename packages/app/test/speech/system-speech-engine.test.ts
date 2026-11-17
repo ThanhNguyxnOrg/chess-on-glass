@@ -1,3 +1,5 @@
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { PassThrough } from "node:stream";
 import { describe, expect, it } from "vitest";
 import type { HelperProcessHandle } from "../../src/native/process-client.js";
@@ -201,6 +203,24 @@ describe("SystemSpeechEngine", () => {
     await engineA.close();
     await engineB.close();
     expect(b.helpers[0]?.killCalls).toBe(0);
+  });
+
+  it("fails closed with a real missing helper instead of crashing the process", async () => {
+    const engine = new SystemSpeechEngine({
+      helperPath: join(tmpdir(), `cog-missing-helper-${Date.now()}.exe`)
+    });
+
+    await expect(
+      engine.listVoices(new AbortController().signal)
+    ).rejects.toBeInstanceOf(SpeechUnavailableError);
+    await expect(
+      engine.speak({
+        text: "hello",
+        voiceId: null,
+        signal: new AbortController().signal
+      })
+    ).rejects.toBeInstanceOf(SpeechUnavailableError);
+    await engine.close();
   });
 
   it("stops accepting work after close", async () => {

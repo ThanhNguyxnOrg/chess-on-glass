@@ -48,6 +48,16 @@ class ManualSession implements NativeCaptureSession {
 
 const JPEG = new Uint8Array([0xff, 0xd8, 0xff, 0xd9]);
 
+async function until(condition: () => boolean, attempts = 100): Promise<void> {
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    if (condition()) {
+      return;
+    }
+    await new Promise<void>((resolve) => setImmediate(resolve));
+  }
+  throw new Error("condition not met");
+}
+
 type FakeModule = {
   module: NativeScreenCaptureModule;
   sessions: Array<{ options: Record<string, unknown>; session: ManualSession }>;
@@ -131,7 +141,7 @@ describe("WindowsCaptureClient", () => {
     });
 
     const pending = client.preview("10", new AbortController().signal);
-    await Promise.resolve();
+    await until(() => fake.sessions.length === 1);
     fake.sessions[0]?.session.push(frame());
 
     await expect(pending).resolves.toEqual(JPEG);
@@ -167,6 +177,34 @@ describe("WindowsCaptureClient", () => {
     await client.close();
   });
 
+  it("rejects numeric aliases and unlisted targets on start", async () => {
+    const fake = fakeModule([
+      { title: "Editor", processName: "editor.exe", handle: 10, isValid: true }
+    ]);
+    const client = await WindowsCaptureClient.open({
+      module: fake.module,
+      encodeJpeg: async () => JPEG
+    });
+
+    await expect(
+      client.open({
+        sessionId: newSessionId(),
+        sourceId: newSourceId(),
+        targetId: "0x10"
+      })
+    ).rejects.toThrow(/target/i);
+    await expect(
+      client.open({
+        sessionId: newSessionId(),
+        sourceId: newSourceId(),
+        targetId: "99"
+      })
+    ).rejects.toThrow(/target/i);
+    expect(fake.sessions).toHaveLength(0);
+
+    await client.close();
+  });
+
   it("opens a screen source bound to the chosen window", async () => {
     const fake = fakeModule([
       { title: "Editor", processName: "editor.exe", handle: 10, isValid: true }
@@ -179,7 +217,7 @@ describe("WindowsCaptureClient", () => {
     const sourceId = newSourceId();
 
     const opening = client.open({ sessionId, sourceId, targetId: "10", fps: 5 });
-    await Promise.resolve();
+    await until(() => fake.sessions.length === 1);
     fake.sessions[0]?.session.push(frame());
     const source = await opening;
 
