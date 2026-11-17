@@ -45,20 +45,23 @@ export function createBoardReader(
       return new OpenAiBoardReader({
         transport: {
           async respond(request) {
-            const response = (await openai.responses.create({
-              model: request.model,
-              input: request.input as never,
-              text: {
-                format: {
-                  ...request.text.format,
-                  schema: request.text.format.schema as {
-                    [key: string]: unknown;
+            const response = (await openai.responses.create(
+              {
+                model: request.model,
+                input: request.input as never,
+                text: {
+                  format: {
+                    type: "json_schema" as const,
+                    name: "board_observation",
+                    strict: true,
+                    schema: request.text.format.schema as {
+                      [key: string]: unknown;
+                    }
                   }
                 }
               },
-              timeout: request.timeoutMs,
-              signal: request.signal
-            } as never)) as unknown as {
+              { signal: request.signal, timeout: request.timeoutMs }
+            )) as unknown as {
               status: string;
               output?: Array<{
                 type: string;
@@ -101,13 +104,16 @@ export function createBoardReader(
       return new AnthropicBoardReader({
         transport: {
           async create(request) {
-            const response = (await anthropic.messages.create({
-              model: request.model,
-              system: request.system,
-              max_tokens: 4096,
-              messages: request.messages as never,
-              output_config: request.output_config as never
-            } as never)) as unknown as {
+            const response = (await anthropic.messages.create(
+              {
+                model: request.model,
+                system: request.system,
+                max_tokens: 4096,
+                messages: request.messages as never,
+                output_config: request.output_config as never
+              },
+              { signal: request.signal, timeout: request.timeoutMs }
+            )) as unknown as {
               stop_reason: string;
               content: Array<{ type: string; text?: string }>;
               usage: { input_tokens: number; output_tokens: number };

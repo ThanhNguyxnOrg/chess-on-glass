@@ -1,6 +1,7 @@
 import { existsSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
+import { dirname, join as pathJoin } from "node:path";
 import { fileURLToPath } from "node:url";
 import { isSupported as wgcSupported } from "@screen-capture/node";
 import type { PlatformServices } from "@chessonglass/platform";
@@ -47,6 +48,7 @@ export async function runDoctor(options?: {
   cloudSmoke?: boolean;
 }): Promise<readonly DoctorCheck[]> {
   const checks: DoctorCheck[] = [];
+  const platform = options?.platform;
 
   checks.push(
     check(
@@ -56,23 +58,38 @@ export async function runDoctor(options?: {
     )
   );
 
-  try {
-    const probe = join(tmpdir(), `cog-doctor-${Date.now()}.probe`);
-    const { writeFile, rm } = await import("node:fs/promises");
-    await writeFile(probe, "ok");
-    await rm(probe, { force: true });
-    checks.push(check("user-data", true, "temporary writes work"));
-  } catch {
-    checks.push(check("user-data", false, "cannot write to user directories"));
-  }
+  if (platform !== undefined) {
+    try {
+      const probe = join(platform.userDataDir(), `cog-doctor-${Date.now()}.probe`);
+      const { writeFile, rm } = await import("node:fs/promises");
+      await mkdir(dirname(probe), { recursive: true });
+      await writeFile(probe, "ok");
+      await rm(probe, { force: true });
+      checks.push(check("user-data", true, `writes work in ${platform.userDataDir()}`));
+    } catch {
+      checks.push(check("user-data", false, "cannot write to user data directory"));
+    }
 
-  checks.push(
-    check(
-      "credential-store",
-      true,
-      "PlatformServices.readSecret/writeSecret interface is available"
-    )
-  );
+    const testAccount = "chessonglass.doctor.probe";
+    try {
+      const testSecret = `probe-${Date.now()}`;
+      await platform.writeSecret(testAccount, testSecret);
+      const readback = await platform.readSecret(testAccount);
+      await platform.writeSecret(testAccount, "\0CLEANUP");
+      checks.push(
+        check(
+          "credential-store",
+          readback === testSecret,
+          readback === testSecret ? "write/read round-trip succeeded" : "readback mismatch"
+        )
+      );
+    } catch {
+      checks.push(check("credential-store", false, "credential write/read failed"));
+    }
+  } else {
+    checks.push(check("user-data", true, "platform services not injected; skipping", "not-run"));
+    checks.push(check("credential-store", false, "platform services not injected; skipping", "not-run"));
+  }
 
   const ffmpeg = findTool("ffmpeg");
   checks.push(

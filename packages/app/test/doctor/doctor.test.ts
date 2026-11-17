@@ -1,9 +1,19 @@
 import { describe, expect, it } from "vitest";
+import type { PlatformServices } from "@chessonglass/platform";
 import { runDoctor } from "../../src/doctor/doctor.js";
+
+class FakePlatform implements PlatformServices {
+  readonly platform = "win32" as const;
+  readonly store = new Map<string, string>();
+  userDataDir(): string { return "C:\\fake\\userdata"; }
+  async readSecret(account: string): Promise<string | null> { return this.store.get(account) ?? null; }
+  async writeSecret(account: string, secret: string): Promise<void> { this.store.set(account, secret); }
+  async openExternal(): Promise<void> { return undefined; }
+}
 
 describe("runDoctor", () => {
   it("reports Node/OS/arch, storage and tool availability without network calls", async () => {
-    const checks = await runDoctor();
+    const checks = await runDoctor({ platform: new FakePlatform() });
     const byId = new Map(checks.map((check) => [check.id, check]));
 
     expect(byId.get("runtime")?.ok).toBe(true);
