@@ -63,10 +63,10 @@ function confidence(overrides: Partial<GeometryConfidence> = {}): GeometryConfid
 describe("projectSquare orientation (white)", () => {
   it("maps boundary squares to their exact image quads on an axis-aligned board", () => {
     const boundaryQuads: ReadonlyArray<[square: number, quad: [Point, Point, Point, Point]]> = [
-      [0, [[100, 700], [175, 700], [175, 625], [100, 625]]],
-      [7, [[625, 700], [700, 700], [700, 625], [625, 625]]],
-      [56, [[100, 175], [175, 175], [175, 100], [100, 100]]],
-      [63, [[625, 175], [700, 175], [700, 100], [625, 100]]]
+      [0, [[100, 175], [175, 175], [175, 100], [100, 100]]],
+      [7, [[625, 175], [700, 175], [700, 100], [625, 100]]],
+      [56, [[100, 700], [175, 700], [175, 625], [100, 625]]],
+      [63, [[625, 700], [700, 700], [700, 625], [625, 625]]]
     ];
     for (const [square, expected] of boundaryQuads) {
       const quad = projectSquare(AFFINE, square, "w");
@@ -79,8 +79,8 @@ describe("projectSquare orientation (white)", () => {
   it("places square centers at their analytic positions", () => {
     for (const square of [0, 18, 27, 42, 63]) {
       const file = square % 8;
-      const rank = Math.floor(square / 8);
-      const center: Point = [100 + 75 * (file + 0.5), 700 - 75 * (rank + 0.5)];
+      const row = 7 - Math.floor(square / 8); // board-frame row from the near edge
+      const center: Point = [100 + 75 * (file + 0.5), 700 - 75 * (row + 0.5)];
       const quad = projectSquare(AFFINE, square, "w");
       const centerX =
         (corner(quad, 0)[0] + corner(quad, 1)[0] + corner(quad, 2)[0] + corner(quad, 3)[0]) / 4;
@@ -102,32 +102,33 @@ describe("projectSquare orientation (black)", () => {
   });
 
   it("puts a1 at the far-right and h8 at the near-left from black's side", () => {
-    expectPointClose(corner(projectSquare(AFFINE, 0, "b"), 2), [700, 100]);
-    expectPointClose(corner(projectSquare(AFFINE, 63, "b"), 0), [100, 700]);
+    expectPointClose(corner(projectSquare(AFFINE, 56, "b"), 2), [700, 100]);
+    expectPointClose(corner(projectSquare(AFFINE, 7, "b"), 0), [100, 700]);
   });
 });
 
 describe("projectSquare on a perspective board", () => {
   it("round-trips the fitted corners through boundary squares", () => {
-    expectPointClose(corner(projectSquare(PERSPECTIVE, 0, "w"), 0), PERSPECTIVE_CORNERS.nearLeft);
+    expectPointClose(corner(projectSquare(PERSPECTIVE, 56, "w"), 0), PERSPECTIVE_CORNERS.nearLeft);
     expectPointClose(
-      corner(projectSquare(PERSPECTIVE, 7, "w"), 1),
+      corner(projectSquare(PERSPECTIVE, 63, "w"), 1),
       PERSPECTIVE_CORNERS.nearRight
     );
     expectPointClose(
-      corner(projectSquare(PERSPECTIVE, 63, "w"), 2),
+      corner(projectSquare(PERSPECTIVE, 7, "w"), 2),
       PERSPECTIVE_CORNERS.farRight
     );
-    expectPointClose(corner(projectSquare(PERSPECTIVE, 56, "w"), 3), PERSPECTIVE_CORNERS.farLeft);
+    expectPointClose(corner(projectSquare(PERSPECTIVE, 0, "w"), 3), PERSPECTIVE_CORNERS.farLeft);
   });
 
   it("agrees on corners shared by adjacent squares and on the board center", () => {
-    // Board corner (4,4) is shared by d4, e4, d5 and e5 and must project to
-    // the same image point from every square that touches it.
-    const shared = corner(projectSquare(PERSPECTIVE, 27, "w"), 2);
-    expectPointClose(shared, corner(projectSquare(PERSPECTIVE, 28, "w"), 3));
-    expectPointClose(shared, corner(projectSquare(PERSPECTIVE, 35, "w"), 1));
-    expectPointClose(shared, corner(projectSquare(PERSPECTIVE, 36, "w"), 0));
+    // Board corner (4,4) is shared by d4 (35), e4 (36), d5 (27) and e5 (28)
+    // and must project to the same image point from every square that touches
+    // it.
+    const shared = corner(projectSquare(PERSPECTIVE, 35, "w"), 2);
+    expectPointClose(shared, corner(projectSquare(PERSPECTIVE, 36, "w"), 3));
+    expectPointClose(shared, corner(projectSquare(PERSPECTIVE, 27, "w"), 1));
+    expectPointClose(shared, corner(projectSquare(PERSPECTIVE, 28, "w"), 0));
     expectPointClose(shared, [500, 350]);
   });
 });

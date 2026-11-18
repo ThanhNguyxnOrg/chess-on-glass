@@ -34,8 +34,9 @@ const LAST_FILE_OR_RANK = SQUARES_PER_SIDE - 1;
  * order near-left, near-right, far-right, far-left (the `BoardCorners`
  * convention applied to the single square, suitable for a closed polygon).
  *
- * `square` uses the `PieceObservation.square` indexing: a1 = 0, h1 = 7,
- * a8 = 56, h8 = 63.
+ * `square` uses the `PieceObservation.square` indexing: row-major from the
+ * top of the board image, so square 0 = a8, square 7 = h8, square 56 = a1,
+ * square 63 = h1 (see packages/chess/src/state.ts).
  *
  * `side` decides how that index lands on the image-fixed corner frame: with
  * `"w"` the white back rank (rank 1) is the near edge and a1 is the near-left
@@ -62,12 +63,15 @@ export function projectSquare(
   if (side !== "w" && side !== "b") {
     throw new GeometryError("invalid-side", 'side must be "w" or "b"');
   }
-  const file = square % SQUARES_PER_SIDE;
-  const rank = Math.floor(square / SQUARES_PER_SIDE);
-  // Side "b" rotates the labeling 180 degrees inside the image-fixed board
-  // frame, so the near edge carries rank 8 and the left edge the h-file.
-  const nearColumn = side === "w" ? file : LAST_FILE_OR_RANK - file;
-  const nearRow = side === "w" ? rank : LAST_FILE_OR_RANK - rank;
+  const column = square % SQUARES_PER_SIDE;
+  const row = Math.floor(square / SQUARES_PER_SIDE);
+  // Square rows count from the top of the board image (row 0 = rank 8), while
+  // board-frame rows count from the near edge (row 0 = rank 1 with side "w"),
+  // hence the flip. Side "b" rotates the labeling 180 degrees inside that
+  // image-fixed frame, so the near edge carries rank 8 and the left edge the
+  // h-file.
+  const nearColumn = side === "w" ? column : LAST_FILE_OR_RANK - column;
+  const nearRow = side === "w" ? LAST_FILE_OR_RANK - row : row;
   return [
     projectPoint(matrix, nearColumn, nearRow),
     projectPoint(matrix, nearColumn + 1, nearRow),
