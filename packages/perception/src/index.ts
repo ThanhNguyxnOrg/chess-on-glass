@@ -61,3 +61,23 @@ export type {
   HomographyMatrix,
   Point
 } from "./geometry/types.js";
+export {
+  FreshnessAwareBoardLocator,
+  MAX_IN_FLIGHT_LOCATOR_CALLS
+} from "./tracking/board-locator.js";
+export type {
+  BoardLocator,
+  BoardLocatorProvider,
+  LocatedBoard,
+  LocatorLedger,
+  LocatorPrice,
+  LocatorRejection,
+  LocatorRejectionCode,
+  LocatorResult
+} from "./tracking/board-locator.js";
+export { GeometryState } from "./tracking/geometry-state.js";
+export type {
+  CurrentGeometry,
+  GeometryInvalidation,
+  GeometryStateOptions
+} from "./tracking/geometry-state.js";
