@@ -197,10 +197,13 @@ function sameRequestContext(left: RequestContext, right: RequestContext): boolea
  *   still reconciled against its own request id, because the provider charge
  *   did happen).
  * - Answers older than `maxAnswerAgeMs`, frames whose sequence did not
- *   advance, frames from another session/source and coordinates that cannot
- *   fit a trusted homography invalidate held geometry instead of extending
- *   its life: tracking can no longer be confirmed, so the overlay must hide
- *   rather than project a possibly-stale transform.
+ *   advance and coordinates that cannot fit a trusted homography invalidate
+ *   held geometry instead of extending its life: tracking can no longer be
+ *   confirmed, so the overlay must hide rather than project a
+ *   possibly-stale transform. A frame from another session/source also
+ *   invalidates held geometry and is rejected, but adopts the new stream
+ *   identity at rejection time so a camera reconnect or session restart
+ *   reacquires on the following frame instead of being rejected forever.
  * - A null provider answer means the board left view or tracking was lost;
  *   that also invalidates held geometry.
  * - Budget follows the board reader's ledger: reserve before the detector
@@ -398,6 +401,16 @@ export class FreshnessAwareBoardLocator implements BoardLocator {
         this.lastApplied.sessionId !== input.frame.sessionId ||
         this.lastApplied.sourceId !== input.frame.sourceId
       ) {
+        // The old stream's held geometry says nothing about the new stream:
+        // drop it and reject this frame so no answer crossing the switch can
+        // render. Adopt the new stream identity here so a camera reconnect or
+        // session restart recovers on the next frame instead of every later
+        // frame being rejected `source-changed` forever.
+        this.lastApplied = {
+          sessionId: input.frame.sessionId,
+          sourceId: input.frame.sourceId,
+          sequence: input.frame.sequence
+        };
         this.state?.invalidate("observation-source-changed");
         return this.reject("source-changed", "locator frame comes from a different session or source");
       }

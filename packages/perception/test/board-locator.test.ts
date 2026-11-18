@@ -564,6 +564,72 @@ describe("FreshnessAwareBoardLocator geometry quality", () => {
     expect(locator.lastRejection()).toMatchObject({ code: "source-changed" });
     expect(state.lastInvalidation()).toMatchObject({ reason: "observation-source-changed" });
   });
+
+  it("reacquires the new stream after a session restart: first frame rejected, second locates", async () => {
+    const provider = staticProvider(VALID_BOARD);
+    const { locator, state } = harness({ provider });
+    const signal = new AbortController().signal;
+    expect(
+      await locator.locate({ frame: frame(5n, 0), context: context("req-1"), signal })
+    ).not.toBeNull();
+    expect(state.current(0)).not.toBeNull();
+
+    // Session restart: the app resets to the new session, whose first frame arrives.
+    const newSession = newSessionId();
+    locator.reset(context("req-2", { sessionId: newSession }));
+    const switched = await locator.locate({
+      frame: frame(6n, 50, { sessionId: newSession }),
+      context: context("req-2", { sessionId: newSession }),
+      signal
+    });
+    // The old stream's geometry is invalidated — the overlay hides.
+    expect(switched).toBeNull();
+    expect(locator.lastRejection()).toMatchObject({ code: "source-changed" });
+    expect(state.lastInvalidation()).toMatchObject({
+      reason: "observation-source-changed",
+      clearedSequence: 5n
+    });
+    expect(state.current(50)).toBeNull();
+
+    // The second frame of the new stream locates normally again.
+    const reacquired = await locator.locate({
+      frame: frame(7n, 60, { sessionId: newSession }),
+      context: context("req-2", { sessionId: newSession }),
+      signal
+    });
+    expect(reacquired).not.toBeNull();
+    expect(locator.lastRejection()).toBeNull();
+    expect(state.current(60)).toEqual({ transform: reacquired?.transform, sequence: 7n });
+  });
+
+  it("reacquires after a camera reconnect on a changed source id", async () => {
+    const provider = staticProvider(VALID_BOARD);
+    const { locator, state } = harness({ provider });
+    const signal = new AbortController().signal;
+    expect(
+      await locator.locate({ frame: frame(5n, 0), context: context("req-1"), signal })
+    ).not.toBeNull();
+    const newSource = newSourceId();
+    const reconnected = await locator.locate({
+      frame: frame(6n, 50, { sourceId: newSource }),
+      context: context("req-2"),
+      signal
+    });
+    // First frame of the reconnected camera: rejected, held geometry dropped.
+    expect(reconnected).toBeNull();
+    expect(locator.lastRejection()).toMatchObject({ code: "source-changed" });
+    expect(state.lastInvalidation()).toMatchObject({ reason: "observation-source-changed" });
+    expect(state.current(50)).toBeNull();
+    // Second frame of the reconnected camera: locates normally, overlay recovers.
+    const reacquired = await locator.locate({
+      frame: frame(7n, 60, { sourceId: newSource }),
+      context: context("req-2"),
+      signal
+    });
+    expect(reacquired).not.toBeNull();
+    expect(locator.lastRejection()).toBeNull();
+    expect(state.current(60)).toEqual({ transform: reacquired?.transform, sequence: 7n });
+  });
 });
 
 describe("FreshnessAwareBoardLocator configuration", () => {
