@@ -1,6 +1,7 @@
 /**
  * Provider-neutral board-reader contract, strict observation parsing,
- * optional local pre-filter, and transport-agnostic vision provider readers.
+ * optional local pre-filter, transport-agnostic vision provider readers, and
+ * validated board-plane geometry for overlay projection.
  * The public surface is documented in docs/architecture.md; no runtime code
  * beyond these contracts belongs here.
  */
@@ -43,3 +44,20 @@ export {
 } from "./providers/provider-catalog.js";
 export type { CatalogEntry } from "./providers/provider-catalog.js";
 export type { ProviderName, ProviderSettings } from "./types.js";
+export { fitBoardHomography } from "./geometry/homography.js";
+export {
+  DEFAULT_MAX_REPROJECTION_ERROR_PX,
+  DEFAULT_MIN_INLIER_RATIO,
+  projectSquare,
+  validateGeometry
+} from "./geometry/board-projection.js";
+export { GeometryError } from "./geometry/types.js";
+export type {
+  BoardCorners,
+  GeometryConfidence,
+  GeometryErrorCode,
+  GeometryValidationOptions,
+  Homography,
+  HomographyMatrix,
+  Point
+} from "./geometry/types.js";
