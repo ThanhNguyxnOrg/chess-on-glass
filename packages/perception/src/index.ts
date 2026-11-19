@@ -81,3 +81,29 @@ export type {
   GeometryInvalidation,
   GeometryStateOptions
 } from "./tracking/geometry-state.js";
+export {
+  ConservativeLocalBoardTracker,
+  MIN_TRACKING_INLIER_COUNT
+} from "./tracking/local-tracker.js";
+export type {
+  ConservativeLocalBoardTrackerOptions,
+  LocalBoardTracker,
+  LocalFlowObservation,
+  LocalFlowProvider,
+  LocalTrackRejection,
+  LocalTrackRejectionCode
+} from "./tracking/local-tracker.js";
+export {
+  DEFAULT_TRACKING_CONFIG,
+  DEFAULT_TRACKING_MODE,
+  TrackingConfigError,
+  resolveTrackingConfig
+} from "./tracking/tracking-config.js";
+export type {
+  TrackingConfig,
+  TrackingConfigErrorCode,
+  TrackingConfigOptions,
+  TrackingMode,
+  TrackingSpikeStatus,
+  TrackingSpikeVerdict
+} from "./tracking/tracking-config.js";
