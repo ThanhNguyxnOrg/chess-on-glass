@@ -12,6 +12,9 @@
     },
     {
       "path": "../game"
+    },
+    {
+      "path": "../perception"
     }
   ]
 }

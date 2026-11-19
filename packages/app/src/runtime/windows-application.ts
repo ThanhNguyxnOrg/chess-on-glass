@@ -11,6 +11,7 @@ import {
   GameCoordinator,
   QueuedTextSink
 } from "@chessonglass/game";
+import type { GeometryState } from "@chessonglass/perception";
 import {
   startDashboardServer,
   type DashboardServer
@@ -22,6 +23,10 @@ import {
 import {
   createWindowsCaptureRoutes
 } from "../http/windows-capture-routes.js";
+import {
+  createOverlayRoutes,
+  type OverlayPipelineSnapshot
+} from "../http/overlay-routes.js";
 import {
   createDashboardRoutes
 } from "../http/dashboard-routes.js";
@@ -94,6 +99,36 @@ export async function startWindowsApplication(
     }
   });
 
+  // Minimal overlay pipeline seam: no capture pipeline feeds frames or board
+  // geometry yet, so the overlay routes answer the labeled unavailable state
+  // until a source wires `latestFrame`/`geometryState` (a later slice feeds
+  // them from the active frame source and locator).
+  let overlayFrame: OverlayPipelineSnapshot["latestFrame"] = null;
+  let overlayGeometryState: GeometryState | null = null;
+  const overlayRoutes = createOverlayRoutes({
+    pipeline: () => {
+      // The coordinator `Result` maps structurally into the perception
+      // `OverlayResult` subset (moveUci/status/reason) here — the app
+      // boundary — so perception never imports game.
+      const snapshot = coordinator.snapshot();
+      const suggestion = snapshot.suggestion;
+      const result = suggestion
+        ? {
+            moveUci: suggestion.moveUci,
+            status: suggestion.status,
+            reason: suggestion.reason ?? snapshot.error
+          }
+        : { moveUci: null, status: snapshot.status, reason: snapshot.error };
+      return {
+        latestFrame: overlayFrame,
+        geometryState: overlayGeometryState,
+        result,
+        position: snapshot.position,
+        note: snapshot.error
+      };
+    }
+  });
+
   const dashboardRoutes = createDashboardRoutes({ coordinator });
 
   const staticDir = resolve(options.staticDir);
@@ -108,6 +143,8 @@ export async function startWindowsApplication(
         if (browserResult !== null) return browserResult;
         const captureResult = await captureRoutes.handle(request);
         if (captureResult !== null) return captureResult;
+        const overlayResult = await overlayRoutes.handle(request);
+        if (overlayResult !== null) return overlayResult;
         return {
           status: 404,
           json: { error: { code: "not_found", message: "no route" } }

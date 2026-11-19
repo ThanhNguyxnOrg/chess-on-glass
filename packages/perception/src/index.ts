@@ -107,3 +107,37 @@ export type {
   TrackingSpikeStatus,
   TrackingSpikeVerdict
 } from "./tracking/tracking-config.js";
+export {
+  MAX_OVERLAY_INPUT_BYTES,
+  MAX_OVERLAY_INPUT_PIXELS,
+  OverlayError,
+  composeOverlaySvg,
+  renderOverlay
+} from "./overlay/render-overlay.js";
+export type {
+  OverlayErrorCode,
+  OverlayInput,
+  OverlayRenderOptions
+} from "./overlay/render-overlay.js";
+export {
+  OVERLAY_MOVE_COLOR,
+  OVERLAY_OUTLINE_COLOR,
+  buildOverlaySvg,
+  escapeXmlAttribute,
+  escapeXmlText
+} from "./overlay/overlay-svg.js";
+export type { OverlaySvgSpec } from "./overlay/overlay-svg.js";
+export {
+  MAX_OVERLAY_TEXT_LENGTH,
+  OVERLAY_HIDDEN_HEADLINE,
+  parseMoveUci,
+  resolveOverlayDisplay,
+  sanitizeOverlayText,
+  sideFromFen,
+  statusLabel
+} from "./overlay/overlay-state.js";
+export type {
+  OverlayDisplay,
+  OverlayDisplayInput,
+  OverlayResult
+} from "./overlay/overlay-state.js";

@@ -115,10 +115,15 @@ describe("locator-only mode stays free of OpenCV and native modules", () => {
     const manifest = JSON.parse(readSource("../package.json")) as {
       dependencies: Record<string, string>;
     };
+    // sharp is the one sanctioned npm dependency beyond workspace packages
+    // (bounded image/overlay composition, exact version pinned with the app);
+    // an OpenCV binding or other native module must never appear here.
     expect(Object.keys(manifest.dependencies).sort()).toEqual([
       "@chessonglass/chess",
-      "@chessonglass/contracts"
+      "@chessonglass/contracts",
+      "sharp"
     ]);
+    expect(manifest.dependencies["sharp"]).toBe("0.35.5");
   });
 
   it("imports no external module in any tracking module (no OpenCV, no native bindings)", () => {
