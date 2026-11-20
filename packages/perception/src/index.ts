@@ -128,6 +128,22 @@ export {
 } from "./overlay/overlay-svg.js";
 export type { OverlaySvgSpec } from "./overlay/overlay-svg.js";
 export {
+  DEFAULT_EXPORT_FPS,
+  MAX_EXPORT_FPS,
+  MAX_EXPORT_FRAME_BYTES,
+  MIN_EXPORT_FPS,
+  OverlayExportError,
+  assertExportFileName,
+  assertExportOutputPath,
+  validateExportFps,
+  validateExportFrame
+} from "./overlay/overlay-exporter.js";
+export type {
+  OverlayExporter,
+  OverlayExporterStartOptions,
+  OverlayExportErrorCode
+} from "./overlay/overlay-exporter.js";
+export {
   MAX_OVERLAY_TEXT_LENGTH,
   OVERLAY_HIDDEN_HEADLINE,
   parseMoveUci,
