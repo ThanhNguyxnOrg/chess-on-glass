@@ -106,6 +106,64 @@ class FakeExporter implements OverlayExporter {
   }
 }
 
+/**
+ * A process-less fake whose write() can be held in flight, used to walk
+ * concurrent route requests through the real HTTP server. It records the
+ * route's abort calls (the writer's kill path) so tests can assert that a
+ * dropped slot never orphans an exporter.
+ */
+class GatedExporter extends FakeExporter {
+  abortCount = 0;
+  writeFailure: unknown = null;
+
+  private enterParked: (() => void) | null = null;
+  private parked: Promise<void> | null = null;
+  private releaseParked: (() => void) | null = null;
+
+  override async start(options: OverlayExporterStartOptions): Promise<void> {
+    // Take the signal before anything can fail, exactly like the real
+    // writer does, so tests observe the route's abort-on-drop contract.
+    options.signal.addEventListener("abort", () => {
+      this.abortCount += 1;
+    });
+    await super.start(options);
+  }
+
+  /** Hold the next write() in flight until releaseHeldWrite() is called. */
+  holdNextWrite(): Promise<void> {
+    let enter!: () => void;
+    let release!: () => void;
+    const entered = new Promise<void>((resolve) => {
+      enter = resolve;
+    });
+    const parked = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    this.enterParked = enter;
+    this.parked = parked;
+    this.releaseParked = release;
+    return entered;
+  }
+
+  releaseHeldWrite(): void {
+    this.releaseParked?.();
+    this.releaseParked = null;
+  }
+
+  override async write(frame: Uint8Array): Promise<void> {
+    const { enterParked, parked } = this;
+    if (enterParked !== null && parked !== null) {
+      this.enterParked = null;
+      enterParked();
+      await parked;
+    }
+    if (this.writeFailure !== null) {
+      throw this.writeFailure;
+    }
+    this.writes.push(frame);
+  }
+}
+
 describe("export routes", () => {
   let server: DashboardServer;
   let exportDirectory: string;
@@ -375,6 +433,148 @@ describe("export routes", () => {
     expect(parsed.error.code).toBe("export_failed");
     expect(parsed.error.message).not.toContain(exportDirectory);
 
+    const statusResponse = await status();
+    expect(JSON.parse(statusResponse.body.toString("utf8"))).toMatchObject({
+      active: false
+    });
+  });
+
+  it("answers 409 busy to an overlapping frame and still settles the first write", async () => {
+    const gated = new GatedExporter();
+    exporter = gated;
+    await startExport({ fileName: "out.mp4" });
+
+    const writeEntered = gated.holdNextWrite();
+    const first = postFrame(jpegBytes(64));
+    await writeEntered;
+
+    const busy = await postFrame(jpegBytes(32));
+    expect(busy.status).toBe(409);
+    expect(JSON.parse(busy.body.toString("utf8"))).toMatchObject({
+      error: { code: "export_busy" }
+    });
+    // The overlap is rejected without touching the export's lifecycle.
+    expect(gated.abortCount).toBe(0);
+
+    gated.releaseHeldWrite();
+    const settled = await first;
+    expect(settled.status).toBe(202);
+    expect(JSON.parse(settled.body.toString("utf8"))).toEqual({
+      accepted: true,
+      framesWritten: 1
+    });
+
+    // The slot survived the overlap and keeps accepting frames.
+    const next = await postFrame(jpegBytes(32));
+    expect(next.status).toBe(202);
+    expect(JSON.parse(next.body.toString("utf8"))).toEqual({
+      accepted: true,
+      framesWritten: 2
+    });
+    const statusResponse = await status();
+    expect(JSON.parse(statusResponse.body.toString("utf8"))).toEqual({
+      active: true,
+      fileName: "out.mp4",
+      framesWritten: 2
+    });
+    expect(gated.abortCount).toBe(0);
+  });
+
+  it("aborts and drops the slot when a frame write fails terminally", async () => {
+    for (const code of ["invalid-state", "process-failed", "aborted"] as const) {
+      const gated = new GatedExporter();
+      exporter = gated;
+      await startExport({ fileName: "out.mp4" });
+      gated.writeFailure = new OverlayExportError(code, `writer failed: ${code}`);
+
+      const frame = await postFrame(jpegBytes(64));
+      expect(frame.status).toBe(code === "invalid-state" ? 409 : 502);
+      // A dropped slot must take the kill path with it: abort first, so the
+      // writer's fail() can retire the FFmpeg child.
+      expect(gated.abortCount).toBe(1);
+      const statusResponse = await status();
+      expect(JSON.parse(statusResponse.body.toString("utf8"))).toMatchObject({
+        active: false
+      });
+    }
+  });
+
+  it("aborts and drops the slot on an unexpected write failure", async () => {
+    const gated = new GatedExporter();
+    exporter = gated;
+    await startExport({ fileName: "out.mp4" });
+    gated.writeFailure = new TypeError("frame writer exploded");
+
+    const frame = await postFrame(jpegBytes(64));
+    expect(frame.status).toBe(500);
+    expect(gated.abortCount).toBe(1);
+    const statusResponse = await status();
+    expect(JSON.parse(statusResponse.body.toString("utf8"))).toMatchObject({
+      active: false
+    });
+  });
+
+  it("aborts and drops the slot when the exporter start fails", async () => {
+    const gated = new GatedExporter();
+    exporter = gated;
+    gated.startError = new OverlayExportError("process-failed", "spawn refused");
+
+    const response = await startExport({ fileName: "out.mp4" });
+    expect(response.status).toBe(502);
+    expect(gated.abortCount).toBe(1);
+    const statusResponse = await status();
+    expect(JSON.parse(statusResponse.body.toString("utf8"))).toMatchObject({
+      active: false
+    });
+  });
+
+  it("answers a frame whose export stopped mid-write with 409, not a crash", async () => {
+    const gated = new GatedExporter();
+    exporter = gated;
+    await startExport({ fileName: "out.mp4" });
+
+    const writeEntered = gated.holdNextWrite();
+    const framePromise = postFrame(jpegBytes(64));
+    await writeEntered;
+
+    const stopped = await stopExport();
+    expect(stopped.status).toBe(200);
+    expect(JSON.parse(stopped.body.toString("utf8"))).toEqual({
+      stopped: true,
+      fileName: "out.mp4",
+      framesWritten: 0
+    });
+
+    gated.releaseHeldWrite();
+    const frame = await framePromise;
+    // The write settled after the slot was dropped: an honest 409. The old
+    // settlement dereferenced the null slot here and answered 500 instead.
+    expect(frame.status).toBe(409);
+    expect(JSON.parse(frame.body.toString("utf8"))).toMatchObject({
+      error: { code: "export_not_active" }
+    });
+    // A clean stop retires the child through close(), not through abort.
+    expect(gated.abortCount).toBe(0);
+  });
+
+  it("aborts exactly once when the overlapped write later fails", async () => {
+    const gated = new GatedExporter();
+    exporter = gated;
+    await startExport({ fileName: "out.mp4" });
+
+    const writeEntered = gated.holdNextWrite();
+    const first = postFrame(jpegBytes(64));
+    await writeEntered;
+
+    const busy = await postFrame(jpegBytes(32));
+    expect(busy.status).toBe(409);
+    expect(gated.abortCount).toBe(0);
+
+    gated.writeFailure = new OverlayExportError("process-failed", "writer died mid-write");
+    gated.releaseHeldWrite();
+    const settled = await first;
+    expect(settled.status).toBe(502);
+    expect(gated.abortCount).toBe(1);
     const statusResponse = await status();
     expect(JSON.parse(statusResponse.body.toString("utf8"))).toMatchObject({
       active: false

@@ -38,6 +38,16 @@ type ActiveExport = {
   fileName: string;
   framesWritten: number;
   controller: AbortController;
+  /**
+   * True while the slot has exactly one unsettled lifecycle operation: a
+   * start or a frame write. The exporter's contract requires the previous
+   * write to settle before the next is offered (and a not-yet-started
+   * writer must not be fed), so the route enforces it: an overlapping frame
+   * is answered 409 busy here instead of reaching the exporter, which means
+   * an overlapping rejection can never drop the slot out from under the
+   * operation that is in flight.
+   */
+  busy: boolean;
 };
 
 /**
@@ -94,12 +104,30 @@ function requireExportBody(json: unknown): { fileName?: unknown; fps?: unknown }
  *
  * Every response is honest JSON with no filesystem paths: clients chose the
  * file name and get exactly that name back, never the resolved location.
+ *
+ * Concurrency: each slot allows one unsettled lifecycle operation at a time
+ * (`busy`). Overlapping frame requests are rejected 409 busy — never by
+ * dropping the slot — so the in-flight write keeps its owner and the FFmpeg
+ * child keeps its feeder. Any failure that drops a slot aborts the slot's
+ * controller first, which routes through the writer's fail() → kill path;
+ * stop instead closes the exporter, which owns the bounded shutdown. The
+ * slot lifecycle has a single owner: handlers capture the slot once and
+ * only mutate it after confirming it still owns `active`.
  */
 export function createExportRoutes(options: ExportRoutesOptions): ComposableRoutes {
   let active: ActiveExport | null = null;
 
-  function deactivate(): void {
-    active = null;
+  /**
+   * Drop a slot that failed. Aborting the controller first gives the writer
+   * its kill path (fail() kills the child), so no FFmpeg process outlives
+   * its slot; clearing `active` only when the slot still owns it keeps a
+   * stale drop from clobbering a replacement export.
+   */
+  function dropSlot(slot: ActiveExport): void {
+    slot.controller.abort();
+    if (active === slot) {
+      active = null;
+    }
   }
 
   return {
@@ -152,14 +180,26 @@ export function createExportRoutes(options: ExportRoutesOptions): ComposableRout
           }
           const outputPath = join(resolve(options.exportDirectory()), fileName);
           const controller = new AbortController();
+          const slot: ActiveExport = {
+            exporter,
+            fileName,
+            framesWritten: 0,
+            controller,
+            // Busy until start settles: frames arriving mid-start are
+            // answered 409 busy, never fed to a not-yet-started exporter.
+            busy: true
+          };
           // Reserve the slot synchronously so concurrent starts cannot race.
-          active = { exporter, fileName, framesWritten: 0, controller };
+          active = slot;
           try {
             await exporter.start({ outputPath, fps, signal: controller.signal });
           } catch (error) {
-            deactivate();
+            // The slot never became usable: take the kill path (abort) and
+            // drop it so a half-started exporter cannot leave a child behind.
+            dropSlot(slot);
             throw error;
           }
+          slot.busy = false;
           return { status: 202, json: { started: true, fileName, fps } };
         } catch (error) {
           if (error instanceof OverlayExportError) {
@@ -170,44 +210,88 @@ export function createExportRoutes(options: ExportRoutesOptions): ComposableRout
       }
 
       if (request.method === "POST" && request.path === EXPORT_FRAME_PATH) {
-        if (active === null) {
+        const slot = active;
+        if (slot === null) {
           throw new HttpError(409, "export_not_active", "no export is running");
+        }
+        if (slot.busy) {
+          // One unsettled operation per slot (start or write). The overlap
+          // is rejected honestly here: the slot stays active, the in-flight
+          // write keeps its owner, and the FFmpeg child keeps its feeder.
+          throw new HttpError(
+            409,
+            "export_busy",
+            "the export slot is busy; the previous frame write has not settled"
+          );
         }
         const frameBytes = request.body ?? new Uint8Array(0);
         try {
           validateExportFrame(frameBytes);
-          await active.exporter.write(frameBytes);
         } catch (error) {
           if (error instanceof OverlayExportError) {
-            if (error.code === "invalid-state" || error.code === "process-failed" || error.code === "aborted") {
-              deactivate();
-            }
             throw toHttpError(error);
           }
           throw error;
         }
-        active.framesWritten += 1;
+        slot.busy = true;
+        let writeError: unknown = null;
+        try {
+          await slot.exporter.write(frameBytes);
+        } catch (error) {
+          writeError = error;
+        } finally {
+          slot.busy = false;
+        }
+        if (writeError !== null) {
+          if (writeError instanceof OverlayExportError) {
+            if (
+              writeError.code === "invalid-state" ||
+              writeError.code === "process-failed" ||
+              writeError.code === "aborted"
+            ) {
+              // Terminal exporter failure: kill (abort) before dropping, so
+              // the child never waits on a stdin nobody will feed.
+              dropSlot(slot);
+            }
+            throw toHttpError(writeError);
+          }
+          // An unexpected failure leaves the exporter's state unknown: kill
+          // and drop rather than keep a slot nobody can trust.
+          dropSlot(slot);
+          throw writeError;
+        }
+        // Count the settled write only while this slot still owns the
+        // export. A stop may have dropped it while the write was in flight;
+        // the captured slot keeps this path from ever dereferencing a slot
+        // that is no longer active.
+        if (active !== slot) {
+          throw new HttpError(409, "export_not_active", "the export is not active");
+        }
+        slot.framesWritten += 1;
         return {
           status: 202,
-          json: { accepted: true, framesWritten: active.framesWritten }
+          json: { accepted: true, framesWritten: slot.framesWritten }
         };
       }
 
       if (request.method === "POST" && request.path === EXPORT_STOP_PATH) {
-        if (active === null) {
+        const slot = active;
+        if (slot === null) {
           throw new HttpError(409, "export_not_active", "no export is running");
         }
         // Stopping is terminal regardless of the close outcome: the writer
-        // refuses further work after close, so the slot must go.
-        const finished = active;
-        deactivate();
+        // refuses further work after close, so the slot must go. No abort
+        // here — close() owns the bounded shutdown (stdin EOF, then the kill
+        // fallback), which is what retires the child; aborting instead would
+        // turn every clean stop into a killed run.
+        active = null;
         try {
-          const result = await finished.exporter.close();
+          const result = await slot.exporter.close();
           return {
             status: 200,
             json: {
               stopped: true,
-              fileName: finished.fileName,
+              fileName: slot.fileName,
               framesWritten: result.framesWritten
             }
           };
