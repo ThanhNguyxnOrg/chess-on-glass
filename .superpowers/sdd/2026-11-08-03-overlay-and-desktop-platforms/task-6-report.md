@@ -405,3 +405,60 @@ keyring`) also passed on Windows Credential Manager:
 
 The random dedicated account name is omitted here; the smoke created it, verified exact readback, removed
 it, and confirmed absence. No secret value was logged.
+
+---
+
+## 9. Fix round 2 — bounded cleanup close waits
+
+**Status:** DONE. Only the new close-wait finding was addressed; the six deferred Minors and all round-1
+fixes were left unchanged.
+
+### Implementation and outcome decision
+
+- `destroyAndClose` now listens for both `close` and `error`, removes both listeners when settling, and
+  races either terminal event against an explicit 2,000 ms deadline. A missing `close` therefore cannot
+  leave an installation (including an aborted installation) pending. After the deadline the existing
+  caller still attempts temporary-file removal; `removeTemporaryFile` still converts a removal rejection
+  to `InstallFailure("cleanup")` rather than pretending cleanup succeeded.
+- A close-time stream `error` resolves the best-effort close wait and is consumed by the attached listener,
+  so it cannot become an unhandled error. That stream error alone deliberately does not replace the
+  install's existing outcome; subsequent removal is still attempted, and a removal failure is surfaced as
+  typed `cleanup`. `end`/`finish` are not treated as descriptor-close substitutes.
+- `closeWrite` retains its existing `close`, `error`, and abort handling and now has the same 2,000 ms
+  deadline. Its timeout rejects with `InstallFailure("cleanup")`; the existing callers then run their
+  bounded destruction/removal path. All close-wait timers are cleared on every settled path.
+
+### Regression tests
+
+Two tests use a real `Readable` feeding the production tar decoder with `autoDestroy: false` and an
+injected `destroy` implementation:
+
+1. A stream that never emits `close` now settles at the deadline (asserted under 5 s), attempts and
+   completes download-temp removal, and preserves the successful extraction outcome.
+2. A stream that emits `error` at destroy time settles without an unhandled error; the still-rejecting
+   injected removal produces `InstallFailure("cleanup")` naming the removal failure.
+
+RED feedback before the implementation:
+
+```
+npx vitest run packages/platform/test/install-artifact.test.ts -t "bounds a close wait|handles a close-time" --testTimeout=5000
+Test Files  1 failed (1)
+     Tests  2 failed | 29 skipped (31)
+```
+
+Both tests timed out after 5 s on the old helper. The same command after the fix passed both tests in
+2.08 s of test time. Required final verification, in the requested order:
+
+```
+npx vitest run packages/platform/test/install-artifact.test.ts
+Test Files  1 passed (1)
+     Tests  31 passed (31)
+
+npm run test:unit
+Test Files  66 passed (66)
+     Tests  539 passed (539)
+
+npm run typecheck
+tsc -b tsconfig.build.json --pretty false
+(exit 0, no diagnostics)
+```

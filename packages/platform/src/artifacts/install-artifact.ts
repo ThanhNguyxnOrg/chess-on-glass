@@ -51,6 +51,7 @@ type ExtractionOptions = Readonly<{
 
 const DEFAULT_MAX_BYTES = 512 * 1024 * 1024;
 const DEFAULT_MAX_MEMBER_BYTES = 1024 * 1024 * 1024;
+const CLOSE_WAIT_TIMEOUT_MS = 2_000;
 const SHA256_HEX = /^[0-9a-f]{64}$/i;
 const LOCAL_HEADER_SIGNATURE = 0x04034b50;
 const CENTRAL_HEADER_SIGNATURE = 0x02014b50;
@@ -286,7 +287,12 @@ function closeWrite(stream: Writable, signal: AbortSignal): Promise<void> {
       cleanup();
       reject(error);
     };
+    const onTimeout = (): void => {
+      cleanup();
+      reject(new InstallFailure("cleanup", "timed out waiting for temporary file stream to close"));
+    };
     const cleanup = (): void => {
+      clearTimeout(timeout);
       signal.removeEventListener("abort", onAbort);
       stream.off("close", onClose);
       stream.off("error", onError);
@@ -303,21 +309,39 @@ function closeWrite(stream: Writable, signal: AbortSignal): Promise<void> {
     signal.addEventListener("abort", onAbort, { once: true });
     stream.once("close", onClose);
     stream.once("error", onError);
+    const timeout = setTimeout(onTimeout, CLOSE_WAIT_TIMEOUT_MS);
     stream.end();
   });
 }
 
-/** Destroy a stream and wait for its actual close event before file removal. */
+/**
+ * Destroy a stream and wait for its actual close event before file removal.
+ * Close-time errors are terminal for this best-effort wait: they are consumed
+ * rather than replacing the install outcome or becoming unhandled, and the
+ * caller still attempts removal (whose failure remains typed as `cleanup`).
+ * The deadline provides the same removal fallback when `close` never arrives.
+ * `end`/`finish` are not close substitutes because they do not prove that the
+ * underlying descriptor has been released.
+ */
 function destroyAndClose(stream: Readable | Writable): Promise<void> {
   if (stream.closed) {
     return Promise.resolve();
   }
   return new Promise<void>((resolve) => {
-    const onClose = (): void => resolve();
-    stream.once("close", onClose);
-    if (stream.closed) {
-      stream.off("close", onClose);
+    const onSettled = (): void => {
+      cleanup();
       resolve();
+    };
+    const cleanup = (): void => {
+      clearTimeout(timeout);
+      stream.off("close", onSettled);
+      stream.off("error", onSettled);
+    };
+    stream.once("close", onSettled);
+    stream.once("error", onSettled);
+    const timeout = setTimeout(onSettled, CLOSE_WAIT_TIMEOUT_MS);
+    if (stream.closed) {
+      onSettled();
       return;
     }
     stream.destroy();

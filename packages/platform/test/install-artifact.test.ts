@@ -3,6 +3,7 @@ import { createReadStream, type ReadStream } from "node:fs";
 import { mkdtemp, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { Readable } from "node:stream";
 import { deflateRawSync, gzipSync } from "node:zlib";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
@@ -745,6 +746,70 @@ describe("installVerifiedArtifact", () => {
     expect((error as InstallFailure).code).toBe("corrupt-member");
     expect((error as Error).message).toMatch(/duplicate/i);
     expect(await readdir(destination)).toEqual([]);
+  });
+
+  it("bounds a close wait when a stream never closes and still removes the download", async () => {
+    const executable = "stockfish/stockfish";
+    const tarGz = tarGzipArchive([{ name: executable, data: EXE_BYTES }]);
+    const input = new Readable({
+      autoDestroy: false,
+      read() {
+        this.push(Buffer.from(tarGz));
+        this.push(null);
+      }
+    });
+    const destroy = vi.spyOn(input, "destroy").mockImplementation(() => input);
+    const createReadStreamImpl = (() => input) as typeof createReadStream;
+    const removeFileImpl = vi.fn(async (path: string) => rm(path, { force: true }));
+    const destination = await temporaryDirectory();
+    const started = Date.now();
+
+    const path = await install(recordFor(tarGz, { executable }), destination, NO_SIGNAL, {
+      fetchImpl: fetchReturning(tarGz),
+      createReadStreamImpl,
+      removeFileImpl
+    });
+
+    expect(Date.now() - started).toBeLessThan(5_000);
+    expect(destroy).toHaveBeenCalled();
+    expect(removeFileImpl).toHaveBeenCalledWith(expect.stringContaining(".cog-download-"));
+    expect(await readdir(destination)).toEqual(["stockfish"]);
+    expect(new Uint8Array(await readFile(path as string))).toEqual(EXE_BYTES);
+  });
+
+  it("handles a close-time stream error and types a subsequent removal failure", async () => {
+    const executable = "stockfish/stockfish";
+    const tarGz = tarGzipArchive([{ name: executable, data: EXE_BYTES }]);
+    const input = new Readable({
+      autoDestroy: false,
+      read() {
+        this.push(Buffer.from(tarGz));
+        this.push(null);
+      }
+    });
+    vi.spyOn(input, "destroy").mockImplementation(() => {
+      queueMicrotask(() => input.emit("error", new Error("injected close-time failure")));
+      return input;
+    });
+    const createReadStreamImpl = (() => input) as typeof createReadStream;
+    const removeFileImpl = vi.fn(async (_path: string) => {
+      throw new Error("injected removal failure");
+    });
+    const destination = await temporaryDirectory();
+
+    const error = await install(recordFor(tarGz, { executable }), destination, NO_SIGNAL, {
+      fetchImpl: fetchReturning(tarGz),
+      createReadStreamImpl,
+      removeFileImpl
+    }).then(
+      () => null,
+      (thrown) => thrown
+    );
+
+    expect(error).toBeInstanceOf(InstallFailure);
+    expect((error as InstallFailure).code).toBe("cleanup");
+    expect((error as Error).message).toContain("injected removal failure");
+    expect(removeFileImpl).toHaveBeenCalled();
   });
 
   it("destroys and closes tar input streams on success, failure and abort", async () => {
