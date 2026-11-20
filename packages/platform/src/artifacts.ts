@@ -24,12 +24,19 @@ function verified(value: string): boolean {
  * Missing evidence, a placeholder or an ambiguous match fails closed; there is
  * no fallback to a generic archive or a global executable.
  */
-export function selectArtifact(
-  records: readonly Artifact[],
+/**
+ * Select exactly one immutable artifact for the requested OS/architecture.
+ * Missing evidence, a placeholder or an ambiguous match fails closed; there is
+ * no fallback to a generic archive or a global executable. Generic so that
+ * extended record types (e.g. VerifiedArtifact with buildFlags and the
+ * executable member) pass through instead of being narrowed away.
+ */
+export function selectArtifact<T extends Artifact>(
+  records: readonly T[],
   id: Artifact["id"],
   os: NodeJS.Platform,
   arch: string
-): Artifact {
+): T {
   const matches = records.filter(
     (record) => record.id === id && record.os === os && record.arch === arch
   );

@@ -73,7 +73,39 @@ switch (command) {
     break;
   }
   case "keyring": {
-    report(true, { detail: "keyring smoke requires a running app instance; use the doctor" });
+    // Real Credential Manager round-trip with a dedicated disposable account.
+    // Only the throwaway smoke credential is written; it is removed even on
+    // failure, and the secret value itself is never included in the report.
+    const { createNativeSecretStore } = await import("@chessonglass/platform");
+    const { randomUUID } = await import("node:crypto");
+    const store = createNativeSecretStore(process.platform);
+    const account = `ChessOnGlass-Task6Smoke-${randomUUID()}`;
+    const secret = `cog-smoke-${randomUUID()}`;
+    let wrote = false;
+    try {
+      await store.write(account, secret);
+      wrote = true;
+      const readback = await store.read(account);
+      const roundTrip = readback === secret;
+      await store.remove(account);
+      const gone = (await store.read(account)) === null;
+      report(roundTrip && gone, {
+        backend: store.backend,
+        account,
+        roundTrip,
+        removed: gone,
+        secretValueLogged: false
+      });
+    } catch (error) {
+      if (wrote) {
+        await store.remove(account).catch(() => undefined);
+      }
+      report(false, {
+        backend: store.backend,
+        account,
+        detail: error instanceof Error ? error.message : String(error)
+      });
+    }
     break;
   }
   case "webcam": {
