@@ -1,9 +1,9 @@
 import { createHash, randomUUID } from "node:crypto";
 import { createReadStream, createWriteStream } from "node:fs";
 import { chmod, mkdir, open, rename, rm, writeFile, type FileHandle } from "node:fs/promises";
-import type { Readable, Writable } from "node:stream";
+import { Readable, type Writable } from "node:stream";
 import { basename, join } from "node:path";
-import { createGunzip, inflateRawSync } from "node:zlib";
+import { createGunzip, createInflateRaw } from "node:zlib";
 import { assertSafeMemberName, type VerifiedArtifact } from "./manifest.js";
 
 export type InstallFailureCode =
@@ -16,6 +16,7 @@ export type InstallFailureCode =
   | "unsafe-member"
   | "corrupt-member"
   | "member-missing"
+  | "cleanup"
   | "io";
 
 /** An installer failure callers can classify without parsing text. */
@@ -36,6 +37,16 @@ export type InstallOptions = Readonly<{
   maxBytes?: number;
   /** Hard ceiling for one extracted member in bytes (decompression guard). */
   maxMemberBytes?: number;
+  /** Test seam; defaults to force-removing a path with fs/promises.rm. */
+  removeFileImpl?: (path: string) => Promise<void>;
+  /** Test seam used to verify archive descriptors are closed on every exit. */
+  createReadStreamImpl?: typeof createReadStream;
+}>;
+
+type ExtractionOptions = Readonly<{
+  maxMemberBytes: number;
+  removeFile: (path: string) => Promise<void>;
+  createReadStreamImpl: typeof createReadStream;
 }>;
 
 const DEFAULT_MAX_BYTES = 512 * 1024 * 1024;
@@ -66,6 +77,11 @@ export async function installVerifiedArtifact(
 ): Promise<string> {
   const maxBytes = options.maxBytes ?? DEFAULT_MAX_BYTES;
   const maxMemberBytes = options.maxMemberBytes ?? DEFAULT_MAX_MEMBER_BYTES;
+  const removeFile =
+    options.removeFileImpl ??
+    (async (path: string): Promise<void> => {
+      await rm(path, { force: true });
+    });
 
   validateRecord(record);
   throwIfAborted(signal);
@@ -79,10 +95,12 @@ export async function installVerifiedArtifact(
     });
     throwIfAborted(signal);
     return await extractMember(record, downloadTemp, destinationDirectory, signal, {
-      maxMemberBytes
+      maxMemberBytes,
+      removeFile,
+      createReadStreamImpl: options.createReadStreamImpl ?? createReadStream
     });
   } finally {
-    await rm(downloadTemp, { force: true }).catch(() => undefined);
+    await removeTemporaryFile(downloadTemp, removeFile);
   }
 }
 
@@ -166,16 +184,9 @@ async function download(
     }
     await closeWrite(write, signal);
   } catch (error) {
-    // Await the close event: on Windows the file cannot be removed while the
-    // stream still holds it, and the caller's cleanup rm() must succeed.
-    await new Promise<void>((resolve) => {
-      if (write.destroyed && !write.writable) {
-        resolve();
-        return;
-      }
-      write.once("close", () => resolve());
-      write.destroy();
-    });
+    // The caller removes the temporary file only after the real close event;
+    // destroyed/writable flags do not prove that the descriptor is closed.
+    await destroyAndClose(write);
     throw error;
   }
 
@@ -262,11 +273,10 @@ function writeChunk(stream: Writable, chunk: Uint8Array, signal: AbortSignal): P
 
 function closeWrite(stream: Writable, signal: AbortSignal): Promise<void> {
   return new Promise<void>((resolve, reject) => {
-    if (signal.aborted) {
-      stream.destroy();
-      reject(abortFailure());
-      return;
-    }
+    const onClose = (): void => {
+      cleanup();
+      resolve();
+    };
     const onAbort = (): void => {
       cleanup();
       stream.destroy();
@@ -278,15 +288,58 @@ function closeWrite(stream: Writable, signal: AbortSignal): Promise<void> {
     };
     const cleanup = (): void => {
       signal.removeEventListener("abort", onAbort);
+      stream.off("close", onClose);
       stream.off("error", onError);
     };
-    signal.addEventListener("abort", onAbort, { once: true });
-    stream.once("error", onError);
-    stream.end(() => {
-      cleanup();
+    if (stream.closed) {
       resolve();
-    });
+      return;
+    }
+    if (signal.aborted) {
+      stream.destroy();
+      reject(abortFailure());
+      return;
+    }
+    signal.addEventListener("abort", onAbort, { once: true });
+    stream.once("close", onClose);
+    stream.once("error", onError);
+    stream.end();
   });
+}
+
+/** Destroy a stream and wait for its actual close event before file removal. */
+function destroyAndClose(stream: Readable | Writable): Promise<void> {
+  if (stream.closed) {
+    return Promise.resolve();
+  }
+  return new Promise<void>((resolve) => {
+    const onClose = (): void => resolve();
+    stream.once("close", onClose);
+    if (stream.closed) {
+      stream.off("close", onClose);
+      resolve();
+      return;
+    }
+    stream.destroy();
+  });
+}
+
+async function removeTemporaryFile(
+  path: string,
+  removeFile: (path: string) => Promise<void>,
+  stream?: Readable | Writable
+): Promise<void> {
+  try {
+    if (stream !== undefined) {
+      await destroyAndClose(stream);
+    }
+    await removeFile(path);
+  } catch (error) {
+    throw new InstallFailure(
+      "cleanup",
+      `failed to close and remove temporary file ${path}: ${describe(error)}`
+    );
+  }
 }
 
 /* ------------------------------------------------------------------ */
@@ -298,7 +351,7 @@ async function extractMember(
   archivePath: string,
   destinationDirectory: string,
   signal: AbortSignal,
-  limits: { maxMemberBytes: number }
+  limits: ExtractionOptions
 ): Promise<string> {
   try {
     const head = new Uint8Array(6);
@@ -355,10 +408,13 @@ async function extractZipMember(
   handle: FileHandle,
   destinationDirectory: string,
   signal: AbortSignal,
-  limits: { maxMemberBytes: number }
+  limits: ExtractionOptions
 ): Promise<string> {
   const entries = await parseZipDirectory(handle);
   const target = pickZipMember(entries, record.executable);
+  if (target.uncompSize > limits.maxMemberBytes) {
+    throw new InstallFailure("size-cap", `zip member exceeded the ${limits.maxMemberBytes} byte cap`);
+  }
   throwIfAborted(signal);
 
   const stat = await handle.stat();
@@ -385,21 +441,24 @@ async function extractZipMember(
   let payload: Buffer;
   if (target.method === 8) {
     try {
-      payload = inflateRawSync(compressed);
+      payload = await inflateRawBounded(compressed, limits.maxMemberBytes, signal);
     } catch (error) {
+      if (error instanceof InstallFailure) {
+        throw error;
+      }
       throw new InstallFailure("corrupt-member", `zip member failed to inflate: ${describe(error)}`);
     }
   } else {
     payload = compressed;
+  }
+  if (payload.byteLength > limits.maxMemberBytes) {
+    throw new InstallFailure("size-cap", `zip member exceeded the ${limits.maxMemberBytes} byte cap`);
   }
   if (payload.byteLength !== target.uncompSize) {
     throw new InstallFailure(
       "corrupt-member",
       `zip member size mismatch: declared ${target.uncompSize}, got ${payload.byteLength}`
     );
-  }
-  if (payload.byteLength > limits.maxMemberBytes) {
-    throw new InstallFailure("size-cap", `zip member exceeded the ${limits.maxMemberBytes} byte cap`);
   }
   if (crc32(payload) !== target.crc) {
     throw new InstallFailure("corrupt-member", "zip member CRC-32 mismatch");
@@ -412,7 +471,7 @@ async function extractZipMember(
     await writeFile(memberTemp, payload, { mode: 0o755, flag: "wx" });
     await rename(memberTemp, finalPath);
   } catch (error) {
-    await rm(memberTemp, { force: true }).catch(() => undefined);
+    await removeTemporaryFile(memberTemp, limits.removeFile);
     throw new InstallFailure("io", `failed to install ${finalPath}: ${describe(error)}`);
   }
   if (process.platform !== "win32") {
@@ -422,15 +481,62 @@ async function extractZipMember(
 }
 
 /**
+ * Inflate through zlib's streaming API and destroy the inflater as soon as
+ * output crosses the hard cap. Only bounded chunks are retained; a small
+ * deflate bomb can never materialize its full declared payload in memory.
+ */
+async function inflateRawBounded(
+  compressed: Buffer,
+  maxMemberBytes: number,
+  signal: AbortSignal
+): Promise<Buffer> {
+  throwIfAborted(signal);
+  const inflater = createInflateRaw({
+    chunkSize: Math.max(64, Math.min(16 * 1024, maxMemberBytes + 1))
+  });
+  const input = Readable.from([compressed]);
+  const chunks: Buffer[] = [];
+  let total = 0;
+  const onAbort = (): void => {
+    inflater.destroy(abortFailure());
+  };
+  signal.addEventListener("abort", onAbort, { once: true });
+  input.pipe(inflater);
+  try {
+    for await (const value of inflater) {
+      const chunk = value as Buffer;
+      total += chunk.byteLength;
+      if (total > maxMemberBytes) {
+        inflater.destroy();
+        throw new InstallFailure(
+          "size-cap",
+          `zip member exceeded the ${maxMemberBytes} byte cap`
+        );
+      }
+      chunks.push(chunk);
+    }
+    return Buffer.concat(chunks, total);
+  } finally {
+    signal.removeEventListener("abort", onAbort);
+    input.destroy();
+    inflater.destroy();
+  }
+}
+
+/**
  * Load and validate every central-directory entry. All member names are
  * validated (not just the allowlisted one) so a hostile archive is rejected
  * wholesale rather than extracted selectively.
  */
 async function parseZipDirectory(handle: FileHandle): Promise<readonly ZipEntry[]> {
-  const buffer = await loadZipDirectory(handle);
+  const { buffer, entryCount } = await loadZipDirectory(handle);
   const entries: ZipEntry[] = [];
   let offset = 0;
-  while (offset + 46 <= buffer.byteLength) {
+  let recordCount = 0;
+  while (offset < buffer.byteLength) {
+    if (buffer.byteLength - offset < 46) {
+      throw new InstallFailure("corrupt-member", "zip central directory header is truncated");
+    }
     if (buffer.readUInt32LE(offset) !== CENTRAL_HEADER_SIGNATURE) {
       throw new InstallFailure("corrupt-member", "zip central directory signature mismatch");
     }
@@ -444,8 +550,13 @@ async function parseZipDirectory(handle: FileHandle): Promise<readonly ZipEntry[
     const commentLength = buffer.readUInt16LE(offset + 32);
     const externalAttrs = buffer.readUInt32LE(offset + 38);
     const localOffset = buffer.readUInt32LE(offset + 42);
+    const recordLength = 46 + nameLength + extraLength + commentLength;
+    if (recordLength > buffer.byteLength - offset) {
+      throw new InstallFailure("corrupt-member", "zip central directory record is truncated");
+    }
     const name = buffer.toString("utf8", offset + 46, offset + 46 + nameLength);
-    offset += 46 + nameLength + extraLength + commentLength;
+    offset += recordLength;
+    recordCount += 1;
 
     if ((flags & 0x0001) !== 0) {
       throw new InstallFailure("unsupported-archive", `zip member ${JSON.stringify(name)} is encrypted`);
@@ -490,6 +601,12 @@ async function parseZipDirectory(handle: FileHandle): Promise<readonly ZipEntry[
     }
     entries.push({ name, method, crc, compSize, uncompSize, localOffset });
   }
+  if (offset !== buffer.byteLength || recordCount !== entryCount) {
+    throw new InstallFailure(
+      "corrupt-member",
+      `zip central directory entry count mismatch: declared ${entryCount}, parsed ${recordCount}`
+    );
+  }
   return entries;
 }
 
@@ -499,7 +616,9 @@ async function parseZipDirectory(handle: FileHandle): Promise<readonly ZipEntry[
  * this buffer is bounded; the EOCD scan walks backwards to tolerate a
  * trailing archive comment.
  */
-async function loadZipDirectory(handle: FileHandle): Promise<Buffer> {
+async function loadZipDirectory(
+  handle: FileHandle
+): Promise<{ buffer: Buffer; entryCount: number }> {
   const stat = await handle.stat();
   const tailLength = Math.min(stat.size, 66_557); // maximum EOCD footprint incl. comment
   const tail = Buffer.alloc(tailLength);
@@ -507,22 +626,46 @@ async function loadZipDirectory(handle: FileHandle): Promise<Buffer> {
 
   let eocd = -1;
   for (let index = tail.byteLength - 22; index >= 0; index -= 1) {
-    if (tail.readUInt32LE(index) === EOCD_SIGNATURE) {
+    if (tail.readUInt32LE(index) !== EOCD_SIGNATURE) {
+      continue;
+    }
+    const commentLength = tail.readUInt16LE(index + 20);
+    if (index + 22 + commentLength === tail.byteLength) {
       eocd = index;
       break;
     }
   }
   if (eocd < 0) {
-    throw new InstallFailure("corrupt-member", "zip end-of-central-directory record not found");
+    throw new InstallFailure(
+      "corrupt-member",
+      "zip end-of-central-directory record not found or has an inconsistent comment length"
+    );
+  }
+  const diskNumber = tail.readUInt16LE(eocd + 4);
+  const directoryDisk = tail.readUInt16LE(eocd + 6);
+  if (diskNumber !== 0 || directoryDisk !== 0) {
+    throw new InstallFailure("unsupported-archive", "multi-disk zip archives are not supported");
+  }
+  const entriesOnDisk = tail.readUInt16LE(eocd + 8);
+  const entryCount = tail.readUInt16LE(eocd + 10);
+  if (entriesOnDisk !== entryCount) {
+    throw new InstallFailure("corrupt-member", "zip end-record entry counts disagree");
   }
   const directorySize = tail.readUInt32LE(eocd + 12);
   const directoryOffset = tail.readUInt32LE(eocd + 16);
-  if (directoryOffset + directorySize > stat.size) {
-    throw new InstallFailure("corrupt-member", "zip central directory extends beyond the archive");
+  if (entryCount === 0xffff || directorySize === 0xffffffff || directoryOffset === 0xffffffff) {
+    throw new InstallFailure("unsupported-archive", "zip64 end records are not supported");
+  }
+  const eocdPosition = stat.size - tailLength + eocd;
+  if (directoryOffset + directorySize !== eocdPosition) {
+    throw new InstallFailure(
+      "corrupt-member",
+      "zip central directory does not end exactly at the end record"
+    );
   }
   const directory = Buffer.alloc(directorySize);
   await readSliceInto(handle, directory, directoryOffset, "zip central directory");
-  return directory;
+  return { buffer: directory, entryCount };
 }
 
 function pickZipMember(entries: readonly ZipEntry[], executable: string): ZipEntry {
@@ -555,80 +698,103 @@ async function extractTarMember(
   archivePath: string,
   destinationDirectory: string,
   signal: AbortSignal,
-  limits: { maxMemberBytes: number }
+  limits: ExtractionOptions
 ): Promise<string> {
-  const reader = new BlockReader(decodeTarStream(archivePath), signal);
+  const decoded = decodeTarStream(archivePath, limits.createReadStreamImpl);
+  const reader = new BlockReader(decoded.output, signal);
   const finalPath = join(destinationDirectory, basename(record.executable));
   const memberTemp = join(destinationDirectory, `.cog-member-${randomUUID()}.tmp`);
-  const out = createWriteStream(memberTemp, { flags: "wx", mode: 0o755 });
+  let out: Writable | undefined;
   let found = false;
   let firstHeader = true;
 
   try {
-    for (;;) {
-      const header = await reader.readBlock(512);
-      if (header === null) {
-        break; // Clean EOF terminates the member list.
-      }
-      if (isZeroBlock(header)) {
-        // ustar ends with two full zero blocks; require both.
-        const trailer = await reader.readBlock(512);
-        if (trailer === null || trailer.byteLength < 512 || !isZeroBlock(trailer)) {
-          throw new InstallFailure("corrupt-member", "tar archive is truncated before its end marker");
+    out = createWriteStream(memberTemp, { flags: "wx", mode: 0o755 });
+    try {
+      for (;;) {
+        const header = await reader.readBlock(512);
+        if (header === null) {
+          break; // Clean EOF terminates the member list.
         }
-        break;
+        if (isZeroBlock(header)) {
+          // ustar ends with two full zero blocks; require both.
+          const trailer = await reader.readBlock(512);
+          if (trailer === null || trailer.byteLength < 512 || !isZeroBlock(trailer)) {
+            throw new InstallFailure("corrupt-member", "tar archive is truncated before its end marker");
+          }
+          break;
+        }
+        const entry = parseTarHeader(header, firstHeader);
+        firstHeader = false;
+        if (entry.size > limits.maxMemberBytes) {
+          throw new InstallFailure(
+            "size-cap",
+            `tar member ${JSON.stringify(entry.name)} exceeded the ${limits.maxMemberBytes} byte cap`
+          );
+        }
+        // Number arithmetic remains exact for the 11-octal-digit ustar size
+        // field; unlike bitwise operators it never truncates to 32 bits.
+        const aligned = entry.size + ((512 - (entry.size % 512)) % 512);
+        if (entry.name === record.executable) {
+          if (found) {
+            throw new InstallFailure(
+              "corrupt-member",
+              `archive contains duplicate member ${JSON.stringify(record.executable)}`
+            );
+          }
+          await streamTarMember(reader, out, entry.size, limits.maxMemberBytes);
+          found = true;
+        } else {
+          await reader.discard(aligned);
+        }
+        throwIfAborted(signal);
       }
-      const entry = parseTarHeader(header, firstHeader);
-      firstHeader = false;
-      const aligned = (entry.size + 511) & ~511;
-      if (entry.name === record.executable) {
-        await streamTarMember(reader, out, entry.size, limits.maxMemberBytes);
-        found = true;
-      } else {
-        await reader.discard(aligned);
+      if (!found) {
+        throw new InstallFailure(
+          "member-missing",
+          `allowlisted member ${JSON.stringify(record.executable)} is not present in the archive`
+        );
       }
-      throwIfAborted(signal);
+      await closeWrite(out, signal);
+    } catch (error) {
+      await removeTemporaryFile(memberTemp, limits.removeFile, out);
+      if (error instanceof InstallFailure) {
+        throw error;
+      }
+      // zlib and filesystem failures surface as raw errors; classify them.
+      throw new InstallFailure("corrupt-member", `tar stream failed: ${describe(error)}`);
     }
-    if (!found) {
-      throw new InstallFailure(
-        "member-missing",
-        `allowlisted member ${JSON.stringify(record.executable)} is not present in the archive`
-      );
-    }
-    await closeWrite(out, signal);
-  } catch (error) {
-    out.destroy();
-    await rm(memberTemp, { force: true }).catch(() => undefined);
-    if (error instanceof InstallFailure) {
-      throw error;
-    }
-    // zlib and filesystem failures surface as raw errors; classify them.
-    throw new InstallFailure("corrupt-member", `tar stream failed: ${describe(error)}`);
-  }
 
-  try {
-    await rename(memberTemp, finalPath);
-  } catch (error) {
-    await rm(memberTemp, { force: true }).catch(() => undefined);
-    throw new InstallFailure("io", `failed to install ${finalPath}: ${describe(error)}`);
+    try {
+      await rename(memberTemp, finalPath);
+    } catch (error) {
+      await removeTemporaryFile(memberTemp, limits.removeFile);
+      throw new InstallFailure("io", `failed to install ${finalPath}: ${describe(error)}`);
+    }
+    if (process.platform !== "win32") {
+      await chmod(finalPath, 0o755).catch(() => undefined);
+    }
+    return finalPath;
+  } finally {
+    decoded.output.destroy();
+    await destroyAndClose(decoded.input);
   }
-  if (process.platform !== "win32") {
-    await chmod(finalPath, 0o755).catch(() => undefined);
-  }
-  return finalPath;
 }
 
 /**
- * Decompress the gzip stream into a Node readable. File errors are forwarded
- * onto the gunzip stream so the consumer sees one error surface; the caller
- * classifies everything that is not already an InstallFailure.
+ * Decompress the gzip stream into Node readables. The input uses autoClose:
+ * false deliberately: the caller explicitly destroys and awaits it on every
+ * success, failure and abort path so no archive descriptor can leak.
  */
-function decodeTarStream(archivePath: string): Readable {
-  const fileStream = createReadStream(archivePath, { autoClose: false });
+function decodeTarStream(
+  archivePath: string,
+  createStream: typeof createReadStream
+): { input: Readable; output: Readable } {
+  const fileStream = createStream(archivePath, { autoClose: false });
   const gunzip = createGunzip();
   fileStream.on("error", (error: Error) => gunzip.destroy(error));
   fileStream.pipe(gunzip);
-  return gunzip;
+  return { input: fileStream, output: gunzip };
 }
 
 function parseTarHeader(header: Buffer, first: boolean): TarHeader {

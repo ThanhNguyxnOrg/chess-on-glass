@@ -58,7 +58,7 @@ export function assertSafeMemberName(name: string, context: string): void {
   if (name.startsWith("/")) {
     fail("must be a relative path");
   }
-  if (/^[a-za-z]:/.test(name)) {
+  if (/^[a-z]:/i.test(name)) {
     fail("drive-letter paths are not allowed");
   }
   for (const segment of name.split("/")) {

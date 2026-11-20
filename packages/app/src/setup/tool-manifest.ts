@@ -13,6 +13,10 @@
  * - stockfish/win32/x64: downloaded 2026-11-20 from the official
  *   Stockfish GitHub release (sf_19), size 81,431,614 bytes (matches the
  *   release asset listing), digest computed over the full download.
+ * - ffmpeg/win32/x64: downloaded 2026-11-20 from the version-pinned GyanD
+ *   codexffmpeg 7.1.1 release, size 92,234,348 bytes, digest computed over
+ *   the full zip download. The archive format and executable path were
+ *   verified before installation and startup/encode smoke.
  */
 export const TOOL_MANIFEST = {
   schemaVersion: 1,
@@ -81,7 +85,7 @@ export const TOOL_MANIFEST = {
       id: "ffmpeg",
       version: "7.1.1",
       url: "https://github.com/GyanD/codexffmpeg/releases/download/7.1.1/ffmpeg-7.1.1-essentials_build.zip",
-      sha256: "unverified",
+      sha256: "04861d3339c5ebe38b56c19a15cf2c0cc97f5de4fa8910e4d47e5e6404e4a2d4",
       os: "win32",
       arch: "x64",
       license: "GPL-3.0-or-later",

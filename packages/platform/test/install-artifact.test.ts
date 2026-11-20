@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { createReadStream, type ReadStream } from "node:fs";
 import { mkdtemp, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -40,6 +41,7 @@ type ZipEntry = {
   zip64Sizes?: boolean;
   corruptDeflate?: boolean;
   wrongCrc?: boolean;
+  declaredSize?: number;
 };
 
 /** Build a minimal but structurally valid zip archive (stored/deflate). */
@@ -58,7 +60,8 @@ function zipArchive(entries: readonly ZipEntry[]): Uint8Array {
     const crc = entry.wrongCrc === true ? 0xdeadbeef : crc32(raw);
     const flags = entry.flags ?? 0;
     const compSize = entry.zip64Sizes === true ? 0xffffffff : compressed.byteLength;
-    const uncompSize = entry.zip64Sizes === true ? 0xffffffff : raw.byteLength;
+    const uncompSize =
+      entry.zip64Sizes === true ? 0xffffffff : (entry.declaredSize ?? raw.byteLength);
     const mode = entry.mode ?? 0o100644;
 
     const local = Buffer.alloc(30 + name.byteLength);
@@ -336,6 +339,20 @@ describe("installVerifiedArtifact", () => {
     expect(await readdir(destination)).toEqual([]);
   });
 
+  it("surfaces temporary-file removal failures with a distinct error code", async () => {
+    const bytes = new Uint8Array(64).fill(7);
+    const destination = await temporaryDirectory();
+    await expect(
+      install(recordFor(bytes), destination, NO_SIGNAL, {
+        fetchImpl: fetchReturning(bytes),
+        maxBytes: 32,
+        removeFileImpl: async (_path: string) => {
+          throw new Error("injected removal failure");
+        }
+      })
+    ).rejects.toMatchObject({ code: "cleanup" });
+  });
+
   it("fails on non-2xx responses", async () => {
     const destination = await temporaryDirectory();
     const fetchImpl = vi.fn(async () => new Response("nope", { status: 404 })) as unknown as typeof fetch;
@@ -545,6 +562,128 @@ describe("installVerifiedArtifact", () => {
     expect(await readdir(destination)).toEqual([]);
   });
 
+  it("aborts a deflate bomb at the streaming member cap instead of materializing it", async () => {
+    const zip = zipArchive([
+      {
+        name: "stockfish/stockfish.exe",
+        data: new Uint8Array(64 * 1024 * 1024),
+        method: 8,
+        // Keep the declared size at the cap so the streaming guard, rather
+        // than a post-inflation declared-size check, must stop the bomb.
+        declaredSize: 1024
+      }
+    ]);
+    expect(zip.byteLength).toBeLessThan(256 * 1024);
+    const destination = await temporaryDirectory();
+    const error = await install(recordFor(zip), destination, NO_SIGNAL, {
+      fetchImpl: fetchReturning(zip),
+      maxMemberBytes: 1024
+    }).then(
+      () => null,
+      (thrown) => thrown
+    );
+    expect(error).toBeInstanceOf(InstallFailure);
+    expect((error as InstallFailure).code).toBe("size-cap");
+    expect(await readdir(destination)).toEqual([]);
+  });
+
+  it("rejects trailing bytes after the zip end record", async () => {
+    const valid = zipArchive([{ name: "stockfish/stockfish.exe", data: EXE_BYTES }]);
+    const zip = new Uint8Array(Buffer.concat([Buffer.from(valid), Buffer.from("trailing garbage")]));
+    const destination = await temporaryDirectory();
+    const error = await install(recordFor(zip), destination, NO_SIGNAL, {
+      fetchImpl: fetchReturning(zip)
+    }).then(
+      () => null,
+      (thrown) => thrown
+    );
+    expect(error).toBeInstanceOf(InstallFailure);
+    expect((error as InstallFailure).code).toBe("corrupt-member");
+    expect(await readdir(destination)).toEqual([]);
+  });
+
+  it("validates zip end-record disk fields and entry counts", async () => {
+    const valid = zipArchive([{ name: "stockfish/stockfish.exe", data: EXE_BYTES }]);
+    const eocd = valid.byteLength - 22;
+    const cases = [
+      {
+        code: "unsupported-archive",
+        mutate: (buffer: Buffer) => buffer.writeUInt16LE(1, eocd + 4)
+      },
+      {
+        code: "unsupported-archive",
+        mutate: (buffer: Buffer) => buffer.writeUInt16LE(1, eocd + 6)
+      },
+      {
+        code: "corrupt-member",
+        mutate: (buffer: Buffer) => buffer.writeUInt16LE(0, eocd + 8)
+      },
+      {
+        code: "corrupt-member",
+        mutate: (buffer: Buffer) => buffer.writeUInt16LE(2, eocd + 10)
+      }
+    ];
+    for (const testCase of cases) {
+      const mutated = Buffer.from(valid);
+      testCase.mutate(mutated);
+      const zip = new Uint8Array(mutated);
+      const destination = await temporaryDirectory();
+      const error = await install(recordFor(zip), destination, NO_SIGNAL, {
+        fetchImpl: fetchReturning(zip)
+      }).then(
+        () => null,
+        (thrown) => thrown
+      );
+      expect(error).toBeInstanceOf(InstallFailure);
+      expect((error as InstallFailure).code).toBe(testCase.code);
+      expect(await readdir(destination)).toEqual([]);
+    }
+  });
+
+  it("bounds-checks every zip central-directory record", async () => {
+    const valid = zipArchive([{ name: "stockfish/stockfish.exe", data: EXE_BYTES }]);
+    const mutated = Buffer.from(valid);
+    const eocd = mutated.byteLength - 22;
+    const central = mutated.readUInt32LE(eocd + 16);
+    mutated.writeUInt16LE(mutated.readUInt16LE(central + 28) + 10, central + 28);
+    const zip = new Uint8Array(mutated);
+    const destination = await temporaryDirectory();
+    const error = await install(recordFor(zip), destination, NO_SIGNAL, {
+      fetchImpl: fetchReturning(zip)
+    }).then(
+      () => null,
+      (thrown) => thrown
+    );
+    expect(error).toBeInstanceOf(InstallFailure);
+    expect((error as InstallFailure).code).toBe("corrupt-member");
+    expect(await readdir(destination)).toEqual([]);
+  });
+
+  it("rejects trailing garbage inside the zip central directory", async () => {
+    const valid = Buffer.from(
+      zipArchive([{ name: "stockfish/stockfish.exe", data: EXE_BYTES }])
+    );
+    const eocd = valid.byteLength - 22;
+    const directorySize = valid.readUInt32LE(eocd + 12);
+    const mutated = Buffer.concat([
+      valid.subarray(0, eocd),
+      Buffer.from([0]),
+      valid.subarray(eocd)
+    ]);
+    mutated.writeUInt32LE(directorySize + 1, eocd + 1 + 12);
+    const zip = new Uint8Array(mutated);
+    const destination = await temporaryDirectory();
+    const error = await install(recordFor(zip), destination, NO_SIGNAL, {
+      fetchImpl: fetchReturning(zip)
+    }).then(
+      () => null,
+      (thrown) => thrown
+    );
+    expect(error).toBeInstanceOf(InstallFailure);
+    expect((error as InstallFailure).code).toBe("corrupt-member");
+    expect(await readdir(destination)).toEqual([]);
+  });
+
   it("rejects a truncated tar stream", async () => {
     const tarGz = tarGzipArchive([{ name: "stockfish/stockfish", data: EXE_BYTES }]);
     const truncated = tarGz.slice(0, tarGz.byteLength - 40);
@@ -560,6 +699,100 @@ describe("installVerifiedArtifact", () => {
     );
     expect(error).toBeInstanceOf(InstallFailure);
     expect(await readdir(destination)).toEqual([]);
+  });
+
+  it("fails closed with size-cap before overflowing tar alignment arithmetic", async () => {
+    const hugeSize = 2 * 1024 * 1024 * 1024 + 512;
+    const executable = "stockfish/stockfish";
+    const tar = Buffer.concat([
+      tarHeader({ name: "other/oversized.bin" }, hugeSize),
+      tarHeader({ name: executable }, EXE_BYTES.byteLength),
+      Buffer.from(EXE_BYTES),
+      Buffer.alloc(512 - (EXE_BYTES.byteLength % 512)),
+      Buffer.alloc(1024)
+    ]);
+    const tarGz = new Uint8Array(gzipSync(tar));
+    const destination = await temporaryDirectory();
+    const error = await install(
+      recordFor(tarGz, { executable }),
+      destination,
+      NO_SIGNAL,
+      { fetchImpl: fetchReturning(tarGz) }
+    ).then(
+      () => null,
+      (thrown) => thrown
+    );
+    expect(error).toBeInstanceOf(InstallFailure);
+    expect((error as InstallFailure).code).toBe("size-cap");
+    expect(await readdir(destination)).toEqual([]);
+  });
+
+  it("rejects duplicate allowlisted tar members instead of concatenating them", async () => {
+    const executable = "stockfish/stockfish";
+    const tarGz = tarGzipArchive([
+      { name: executable, data: EXE_BYTES },
+      { name: executable, data: EXE_BYTES }
+    ]);
+    const destination = await temporaryDirectory();
+    const error = await install(recordFor(tarGz, { executable }), destination, NO_SIGNAL, {
+      fetchImpl: fetchReturning(tarGz),
+      maxMemberBytes: EXE_BYTES.byteLength
+    }).then(
+      () => null,
+      (thrown) => thrown
+    );
+    expect(error).toBeInstanceOf(InstallFailure);
+    expect((error as InstallFailure).code).toBe("corrupt-member");
+    expect((error as Error).message).toMatch(/duplicate/i);
+    expect(await readdir(destination)).toEqual([]);
+  });
+
+  it("destroys and closes tar input streams on success, failure and abort", async () => {
+    const executable = "stockfish/stockfish";
+    const tarGz = tarGzipArchive([{ name: executable, data: EXE_BYTES }]);
+    const inputs: ReadStream[] = [];
+    const trackingFactory = ((path: string, options: { autoClose: boolean }) => {
+      const input = createReadStream(path, options);
+      vi.spyOn(input, "destroy");
+      inputs.push(input);
+      return input;
+    }) as typeof createReadStream;
+    const expectDestroyedAndClosed = (input: ReadStream): void => {
+      expect(input.destroy).toHaveBeenCalled();
+      expect(input.closed).toBe(true);
+    };
+
+    await install(recordFor(tarGz, { executable }), await temporaryDirectory(), NO_SIGNAL, {
+      fetchImpl: fetchReturning(tarGz),
+      createReadStreamImpl: trackingFactory
+    });
+    expect(inputs).toHaveLength(1);
+    expectDestroyedAndClosed(inputs[0]!);
+
+    const truncated = tarGz.slice(0, tarGz.byteLength - 40);
+    await expect(
+      install(recordFor(truncated, { executable }), await temporaryDirectory(), NO_SIGNAL, {
+        fetchImpl: fetchReturning(truncated),
+        createReadStreamImpl: trackingFactory
+      })
+    ).rejects.toBeInstanceOf(InstallFailure);
+    expect(inputs).toHaveLength(2);
+    expectDestroyedAndClosed(inputs[1]!);
+
+    const controller = new AbortController();
+    const abortingFactory = ((path: string, options: { autoClose: boolean }) => {
+      const input = trackingFactory(path, options);
+      controller.abort();
+      return input;
+    }) as typeof createReadStream;
+    await expect(
+      install(recordFor(tarGz, { executable }), await temporaryDirectory(), controller.signal, {
+        fetchImpl: fetchReturning(tarGz),
+        createReadStreamImpl: abortingFactory
+      })
+    ).rejects.toMatchObject({ code: "aborted" });
+    expect(inputs).toHaveLength(3);
+    expectDestroyedAndClosed(inputs[2]!);
   });
 
   it("rejects gzip payloads that are not tar archives", async () => {

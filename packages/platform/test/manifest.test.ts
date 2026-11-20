@@ -81,6 +81,10 @@ describe("parseArtifactManifest", () => {
       "a/../../stockfish.exe",
       "stockfish\\stockfish.exe",
       "C:\\stockfish.exe",
+      "C:/stockfish.exe",
+      "C:stockfish.exe",
+      "z:/stockfish.exe",
+      "Z:stockfish.exe",
       "stockfish//stockfish.exe",
       "./stockfish.exe",
       "stockfish/ "
