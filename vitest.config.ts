@@ -22,8 +22,6 @@ export default defineConfig({
     exclude: [
       "node_modules/**",
       "dist/**",
-      "tests/**",
-      "evals/**",
       "**/*.integration.test.ts"
     ],
     testTimeout: 15000

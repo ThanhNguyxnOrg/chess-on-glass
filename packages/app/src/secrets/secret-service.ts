@@ -27,7 +27,12 @@ export class SecretService {
   }
 
   async status(provider: SecretProviderName): Promise<SecretStatus> {
-    const keyring = await this.platform.readSecret(this.account(provider));
+    let keyring: string | null = null;
+    try {
+      keyring = await this.platform.readSecret(this.account(provider));
+    } catch {
+      keyring = null;
+    }
     if (keyring !== null && keyring !== "") {
       return { configured: true, source: "keyring" };
     }
@@ -36,6 +41,23 @@ export class SecretService {
       return { configured: true, source: "environment" };
     }
     return { configured: false, source: null };
+  }
+
+  async read(provider: SecretProviderName): Promise<string | null> {
+    let keyring: string | null = null;
+    try {
+      keyring = await this.platform.readSecret(this.account(provider));
+    } catch {
+      keyring = null;
+    }
+    if (keyring !== null && keyring !== "") {
+      return keyring;
+    }
+    const envValue = this.env[provider];
+    if (typeof envValue === "string" && envValue.trim() !== "") {
+      return envValue.trim();
+    }
+    return null;
   }
 
   async write(

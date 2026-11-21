@@ -29,7 +29,7 @@ export function clear(el: HTMLElement): void {
 }
 
 /** Build a chess board as an inline SVG (safe, no innerHTML). */
-export function boardSvg(fen: string): SVGSVGElement {
+export function boardSvg(fen: string, highlightUci?: string | null): SVGSVGElement {
   const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
   svg.setAttribute("viewBox", "0 0 400 400");
   svg.setAttribute("width", "100%");
@@ -38,6 +38,8 @@ export function boardSvg(fen: string): SVGSVGElement {
 
   const darkSquare = "#3d3a33";
   const lightSquare = "#b8a988";
+
+  const parsedMove = parseUciMove(highlightUci);
 
   for (let row = 0; row < 8; row++) {
     for (let col = 0; col < 8; col++) {
@@ -48,6 +50,20 @@ export function boardSvg(fen: string): SVGSVGElement {
       rect.setAttribute("height", "50");
       rect.setAttribute("fill", (row + col) % 2 === 0 ? lightSquare : darkSquare);
       svg.append(rect);
+
+      if (
+        parsedMove !== null &&
+        ((parsedMove.fromRow === row && parsedMove.fromCol === col) ||
+          (parsedMove.toRow === row && parsedMove.toCol === col))
+      ) {
+        const hi = document.createElementNS("http://www.w3.org/2000/svg", "rect");
+        hi.setAttribute("x", String(col * 50));
+        hi.setAttribute("y", String(row * 50));
+        hi.setAttribute("width", "50");
+        hi.setAttribute("height", "50");
+        hi.setAttribute("fill", "rgba(212, 168, 67, 0.42)");
+        svg.append(hi);
+      }
     }
   }
 
@@ -59,12 +75,49 @@ export function boardSvg(fen: string): SVGSVGElement {
     text.setAttribute("text-anchor", "middle");
     text.setAttribute("font-size", "32");
     text.setAttribute("font-family", "Segoe UI Symbol, sans-serif");
-    text.setAttribute("fill", piece.color === "white" ? "#f0d9b5" : "#2b2b2b");
+    text.setAttribute("fill", piece.color === "white" ? "#fff6e5" : "#1b1b1b");
     text.textContent = piece.unicode;
     svg.append(text);
   }
 
+  if (parsedMove !== null) {
+    const x1 = parsedMove.fromCol * 50 + 25;
+    const y1 = parsedMove.fromRow * 50 + 25;
+    const x2 = parsedMove.toCol * 50 + 25;
+    const y2 = parsedMove.toRow * 50 + 25;
+    const line = document.createElementNS("http://www.w3.org/2000/svg", "line");
+    line.setAttribute("x1", String(x1));
+    line.setAttribute("y1", String(y1));
+    line.setAttribute("x2", String(x2));
+    line.setAttribute("y2", String(y2));
+    line.setAttribute("stroke", "#d4a843");
+    line.setAttribute("stroke-width", "6");
+    line.setAttribute("stroke-linecap", "round");
+    line.setAttribute("stroke-opacity", "0.85");
+    svg.append(line);
+
+    const tip = document.createElementNS("http://www.w3.org/2000/svg", "circle");
+    tip.setAttribute("cx", String(x2));
+    tip.setAttribute("cy", String(y2));
+    tip.setAttribute("r", "7");
+    tip.setAttribute("fill", "#d4a843");
+    svg.append(tip);
+  }
+
   return svg;
+}
+
+function parseUciMove(
+  uci: string | null | undefined
+): { fromRow: number; fromCol: number; toRow: number; toCol: number } | null {
+  if (typeof uci !== "string" || !/^[a-h][1-8][a-h][1-8][qrbn]?$/.test(uci)) {
+    return null;
+  }
+  const fromCol = uci.charCodeAt(0) - 97;
+  const fromRow = 8 - Number(uci[1]);
+  const toCol = uci.charCodeAt(2) - 97;
+  const toRow = 8 - Number(uci[3]);
+  return { fromRow, fromCol, toRow, toCol };
 }
 
 function parseFenPieces(fen: string): Array<{

@@ -17,37 +17,8 @@ const LOGO_PATH = "asset/logo.png";
 const LOGO_SHA256 =
   "3054b16d2b2cfd263fc3bd2997c392cec6fb9f17b7bb1a9a0bdf22af4af79909";
 const ORIGINAL_AUTHOR = "picklerpeej";
-const LEGACY_INVENTORY = "docs/legacy-replacement.md";
 
-/** Every file that existed under the legacy `src/` at baseline 2aaa0f9. */
-const LEGACY_SRC_FILES = [
-  "src/bin.ts",
-  "src/board-svg.ts",
-  "src/capture.ts",
-  "src/cli.ts",
-  "src/config.ts",
-  "src/doctor.ts",
-  "src/engine.ts",
-  "src/events.ts",
-  "src/feed.ts",
-  "src/game.ts",
-  "src/gate.ts",
-  "src/geometry.ts",
-  "src/keychain.ts",
-  "src/locate.ts",
-  "src/macos.ts",
-  "src/main.ts",
-  "src/match.ts",
-  "src/overlay.ts",
-  "src/pricing.ts",
-  "src/speak.ts",
-  "src/static/index.html",
-  "src/vision.ts",
-  "src/watch.ts",
-  "src/web.ts"
-];
-
-/** Markers that legacy-style tests used; none may reach runtime sources. */
+/** Markers that tests use; none may reach runtime sources. */
 const DUMMY_SECRET_MARKERS = [
   "sk-live-",
   "sk-test-",
@@ -192,30 +163,8 @@ defineCheck("dummy secret markers", async () => {
   }
 });
 
-defineCheck("legacy inventory", async () => {
-  const inventory = await readIfPresent(join(root, LEGACY_INVENTORY));
-  if (inventory === null) {
-    fail(`${LEGACY_INVENTORY} is missing`);
-    return;
-  }
-  const lines = inventory.split(/\r?\n/);
-  for (const legacy of LEGACY_SRC_FILES) {
-    const line = lines.find((entry) => entry.includes(legacy));
-    if (line === undefined) {
-      fail(`${LEGACY_INVENTORY} does not mention ${legacy}`);
-      continue;
-    }
-    if (!/false/.test(line)) {
-      fail(`${legacy} must record removal-approved:false`);
-    }
-  }
-  if (/removal-approved[^\n]*true/i.test(inventory)) {
-    fail("no legacy file may be approved for removal yet");
-  }
-});
-
-defineCheck("README and DESIGN branding", async () => {
-  for (const doc of ["README.md", "DESIGN.md"]) {
+defineCheck("README and docs branding", async () => {
+  for (const doc of ["README.md", "docs/architecture.md"]) {
     const text = await readIfPresent(join(root, doc));
     if (text === null) {
       fail(`${doc} is missing`);

@@ -1,7 +1,6 @@
-import { existsSync } from "node:fs";
+import { existsSync, readdirSync } from "node:fs";
 import { mkdir } from "node:fs/promises";
-import { join } from "node:path";
-import { dirname, join as pathJoin } from "node:path";
+import { delimiter, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { isSupported as wgcSupported } from "@screen-capture/node";
 import type { PlatformServices } from "@chessonglass/platform";
@@ -24,8 +23,36 @@ function check(
   return { id, ok, detail, status: status ?? (ok ? "ok" : "fail") };
 }
 
-function findTool(name: string): string | null {
-  const paths = (process.env["PATH"] ?? "").split(/[;:]/);
+function findTool(
+  name: "ffmpeg" | "stockfish",
+  envVar: string,
+  env: NodeJS.ProcessEnv,
+  dataDir?: string
+): string | null {
+  const fromEnv = env[envVar];
+  if (typeof fromEnv === "string" && fromEnv.trim() !== "" && existsSync(fromEnv.trim())) {
+    return fromEnv.trim();
+  }
+  if (dataDir !== undefined) {
+    const toolDir = join(dataDir, "tools", name);
+    if (existsSync(toolDir)) {
+      try {
+        for (const entry of readdirSync(toolDir)) {
+          if (entry.startsWith(".")) continue;
+          if (process.platform === "win32" && !entry.toLowerCase().endsWith(".exe")) {
+            continue;
+          }
+          const candidate = join(toolDir, entry);
+          if (existsSync(candidate)) {
+            return candidate;
+          }
+        }
+      } catch {
+        // ignore read error
+      }
+    }
+  }
+  const paths = (env["PATH"] ?? "").split(delimiter);
   for (const dir of paths) {
     if (dir.trim() === "") continue;
     for (const ext of process.platform === "win32" ? [".exe", ""] : [""]) {
@@ -46,14 +73,16 @@ function findTool(name: string): string | null {
 export async function runDoctor(options?: {
   platform?: PlatformServices;
   cloudSmoke?: boolean;
+  env?: NodeJS.ProcessEnv;
 }): Promise<readonly DoctorCheck[]> {
   const checks: DoctorCheck[] = [];
   const platform = options?.platform;
+  const env = options?.env ?? process.env;
 
   checks.push(
     check(
       "runtime",
-      Number(process.version.match(/^v(\d+)/)?.[1] ?? 0) >= 20,
+      Number(process.version.match(/^v(\d+)/)?.[1] ?? 0) >= 24,
       `Node ${process.version} on ${process.platform} ${process.arch}`
     )
   );
@@ -91,17 +120,22 @@ export async function runDoctor(options?: {
     checks.push(check("credential-store", false, "platform services not injected; skipping", "not-run"));
   }
 
-  const ffmpeg = findTool("ffmpeg");
+  const dataDir = platform?.userDataDir();
+  const ffmpeg = findTool("ffmpeg", "CHESSONGLASS_FFMPEG", env, dataDir);
   checks.push(
-    check("ffmpeg", ffmpeg !== null, ffmpeg ? `found at ${ffmpeg}` : "not found on PATH")
+    check(
+      "ffmpeg",
+      ffmpeg !== null,
+      ffmpeg ? `found at ${ffmpeg}` : "not installed (run `chessonglass install-tools ffmpeg` or set CHESSONGLASS_FFMPEG)"
+    )
   );
 
-  const stockfish = findTool("stockfish");
+  const stockfish = findTool("stockfish", "CHESSONGLASS_STOCKFISH", env, dataDir);
   checks.push(
     check(
       "stockfish",
       stockfish !== null,
-      stockfish ? `found at ${stockfish}` : "not found on PATH"
+      stockfish ? `found at ${stockfish}` : "not installed (run `chessonglass install-tools stockfish` or set CHESSONGLASS_STOCKFISH)"
     )
   );
 

@@ -339,6 +339,7 @@ export function createHarness(
     shutdownTimeoutMs?: number;
     ledger?: CostLedger;
     sink?: CoordinatorDependencies["sink"];
+    readPrice?: CoordinatorDependencies["readPrice"];
   } = {}
 ): Harness {
   const source = new ManualSource();
@@ -353,6 +354,7 @@ export function createHarness(
     store,
     ledger,
     sink: options.sink ?? sink,
+    ...(options.readPrice === undefined ? {} : { readPrice: options.readPrice }),
     ...(options.now === undefined ? {} : { now: options.now }),
     ...(options.shutdownTimeoutMs === undefined
       ? {}

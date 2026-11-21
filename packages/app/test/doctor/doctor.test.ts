@@ -13,7 +13,7 @@ class FakePlatform implements PlatformServices {
 
 describe("runDoctor", () => {
   it("reports Node/OS/arch, storage and tool availability without network calls", async () => {
-    const checks = await runDoctor({ platform: new FakePlatform() });
+    const checks = await runDoctor({ platform: new FakePlatform(), env: { PATH: "" } });
     const byId = new Map(checks.map((check) => [check.id, check]));
 
     expect(byId.get("runtime")?.ok).toBe(true);

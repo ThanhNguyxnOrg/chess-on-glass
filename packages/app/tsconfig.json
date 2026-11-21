@@ -15,6 +15,9 @@
     },
     {
       "path": "../perception"
+    },
+    {
+      "path": "../platform"
     }
   ]
 }

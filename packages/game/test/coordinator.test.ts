@@ -588,3 +588,101 @@ describe("SourceSlot", () => {
     expect(stuck.closeCalls).toBe(1);
   });
 });
+
+describe("GameCoordinator cost ledger accounting", () => {
+  const TEST_PRICE = {
+    inputPerMillion: 1000,
+    outputPerMillion: 2000,
+    effectiveAt: "2026-11-01T00:00:00Z"
+  };
+
+  it("reserves before reading and settles actual token cost on success", async () => {
+    const ledger = new CostLedger(2, 0.5);
+    const h = createHarness({ ledger, readPrice: TEST_PRICE });
+    const sessionId = newSessionId();
+    const sourceId = newSourceId();
+    await h.coordinator.start(h.source, startPosition(), sessionId);
+
+    h.source.push(makeFrame(sessionId, sourceId, 1n, new Uint8Array([1, 2, 3])));
+    await until(() => h.reader.calls.length === 1);
+
+    // Reserved while in-flight
+    expect(ledger.snapshot().reservedUsd).toBe(0.5);
+    expect(ledger.snapshot().actualUsd).toBe(0);
+
+    const call = h.reader.calls[0]!;
+    call.resolve({
+      ok: true,
+      observation: {
+        ...observationFor({ context: call.input.context, fen: fenAfter(["e2e4"]) }),
+        inputTokens: 500,
+        outputTokens: 250
+      }
+    });
+    await flushTurns();
+
+    // 500/1e6 * 1000 + 250/1e6 * 2000 = 0.5 + 0.5 = 1.0 USD
+    expect(ledger.snapshot().reservedUsd).toBe(0);
+    expect(ledger.snapshot().actualUsd).toBeCloseTo(1.0, 6);
+
+    await h.coordinator.close();
+  });
+
+  it("releases the reservation when a read fails", async () => {
+    const ledger = new CostLedger(2, 0.5);
+    const h = createHarness({ ledger, readPrice: TEST_PRICE });
+    const sessionId = newSessionId();
+    const sourceId = newSourceId();
+    await h.coordinator.start(h.source, startPosition(), sessionId);
+
+    h.source.push(makeFrame(sessionId, sourceId, 1n, new Uint8Array([4, 5, 6])));
+    await until(() => h.reader.calls.length === 1);
+    expect(ledger.snapshot().reservedUsd).toBe(0.5);
+
+    h.reader.settle(0, {
+      ok: false,
+      code: "unavailable",
+      message: "provider down",
+      retryable: true
+    });
+    await flushTurns();
+
+    expect(ledger.snapshot().reservedUsd).toBe(0);
+    expect(ledger.snapshot().actualUsd).toBe(0);
+
+    await h.coordinator.close();
+  });
+
+  it("pauses paid work once settled spend exhausts the budget cap", async () => {
+    const ledger = new CostLedger(1.2, 0.5);
+    const h = createHarness({ ledger, readPrice: TEST_PRICE });
+    const sessionId = newSessionId();
+    const sourceId = newSourceId();
+    await h.coordinator.start(h.source, startPosition(), sessionId);
+
+    h.source.push(makeFrame(sessionId, sourceId, 1n, new Uint8Array([7, 8, 9])));
+    await until(() => h.reader.calls.length === 1);
+    const call = h.reader.calls[0]!;
+    call.resolve({
+      ok: true,
+      observation: {
+        ...observationFor({ context: call.input.context, fen: fenAfter(["e2e4"]) }),
+        inputTokens: 500,
+        outputTokens: 250
+      }
+    });
+    await flushTurns();
+
+    // actualUsd = 1.0, reservePerCall = 0.5 -> 1.5 > 1.2 => paused
+    expect(ledger.snapshot().paused).toBe(true);
+
+    h.source.push(makeFrame(sessionId, sourceId, 2n, new Uint8Array([10, 11, 12])));
+    await flushTurns();
+
+    expect(h.reader.calls.length).toBe(1);
+    expect(h.coordinator.snapshot().status).toBe("uncertain");
+    expect(h.coordinator.snapshot().error).toMatch(/budget exhausted/i);
+
+    await h.coordinator.close();
+  });
+});

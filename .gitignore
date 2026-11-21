@@ -1,17 +1,16 @@
 node_modules/
 dist/
-.DS_Store
 coverage/
 *.tsbuildinfo
+*.log
+.DS_Store
+.env
+.env.local
 
-# Recordings can show the opponent and the room; keep them local.
+# Local video recordings (keep private)
 fixtures/*.mov
 fixtures/*.MOV
 fixtures/*.mp4
 
-# Eval logs and cached model answers
-evals/out/
-evals/.cache/
-
-# Short-lived agent workspace (self-ignored there too).
-.superpowers/
+# Built native speech helper binary
+packages/app/native/speech/bin/

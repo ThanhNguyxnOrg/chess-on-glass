@@ -1,7 +1,8 @@
-name: ci
+name: CI
 
 on:
   push:
+    branches: [main]
   pull_request:
 
 jobs:
@@ -24,9 +25,13 @@ jobs:
           cache: npm
       - name: Install locked dependencies
         run: npm ci
-      - name: Typecheck
+      - name: Typecheck workspaces
         run: npm run typecheck
-      - name: Build
+      - name: Typecheck UI
+        run: npm --workspace=@chessonglass/ui run typecheck
+      - name: Build workspaces and UI
         run: npm run build
-      - name: Unit and contract tests
+      - name: Brand and hygiene checks
+        run: npm run check:brand
+      - name: Unit and integration tests
         run: npm run test:unit

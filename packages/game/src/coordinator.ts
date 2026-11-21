@@ -20,7 +20,7 @@ import {
 } from "@chessonglass/contracts";
 import { toReadFailure, type BoardReader, type ReadFailure, type ReadResult } from "@chessonglass/perception";
 import type { Advisor } from "@chessonglass/platform";
-import type { CostLedger } from "./budget.js";
+import type { CostLedger, Price } from "./budget.js";
 import type { GameCommand } from "./commands.js";
 import { isCanonicalSessionId, type GameRecord } from "./journal.js";
 import {
@@ -56,10 +56,22 @@ export type CoordinatorDependencies = {
   store: GameStore;
   ledger: CostLedger;
   sink: ResultSink;
+  /**
+   * Provider token pricing used to reserve/settle each vision read on the
+   * shared CostLedger. When omitted (local/test fakes), a zero-rate known
+   * price is used so reservation/pause accounting still runs.
+   */
+  readPrice?: Price | (() => Price | null);
   /** Injectable clock for deterministic freshness tests. */
   now?: () => number;
   /** Overall bound for close/source replacement, default 2 s. */
   shutdownTimeoutMs?: number;
+};
+
+const DEFAULT_LOCAL_PRICE: Price = {
+  inputPerMillion: 0,
+  outputPerMillion: 0,
+  effectiveAt: "2026-01-01T00:00:00Z"
 };
 
 const EVIDENCE_LIMIT = 4;
@@ -474,6 +486,15 @@ export class GameCoordinator {
     this.emitSnapshot();
   }
 
+  private resolveReadPrice(): Price | null {
+    if (this.deps.readPrice === undefined) {
+      return DEFAULT_LOCAL_PRICE;
+    }
+    return typeof this.deps.readPrice === "function"
+      ? this.deps.readPrice()
+      : this.deps.readPrice;
+  }
+
   private async readFrame(frame: Frame, previous: Frame | null): Promise<void> {
     if (this.activeReadToken !== null) {
       return;
@@ -481,7 +502,26 @@ export class GameCoordinator {
     const token = Symbol("read");
     this.activeReadToken = token;
     const request = this.beginRequest(frame.sequence);
+    let reserved = false;
     try {
+      const price = this.resolveReadPrice();
+      if (price === null) {
+        this.endRequest(request.context.requestId);
+        this.markUncertain("vision model pricing is unavailable");
+        return;
+      }
+      const reservation = this.deps.ledger.reserve(request.context.requestId, price);
+      if (!reservation.allowed) {
+        this.endRequest(request.context.requestId);
+        if (this.deps.ledger.snapshot().paused || reservation.reason === "estimated budget exhausted") {
+          this.markBudgetExhausted();
+        } else {
+          this.markUncertain(reservation.reason ?? BUDGET_EXHAUSTED);
+        }
+        return;
+      }
+      reserved = true;
+
       const reference =
         previous !== null && this.position !== null
           ? { frame: previous, position: this.position.position() }
@@ -498,6 +538,18 @@ export class GameCoordinator {
         result = toReadFailure(error, request.controller.signal);
       }
 
+      if (result.ok) {
+        this.deps.ledger.settle(
+          request.context.requestId,
+          result.observation.inputTokens,
+          result.observation.outputTokens,
+          price
+        );
+      } else {
+        this.deps.ledger.release(request.context.requestId);
+      }
+      reserved = false;
+
       const live = this.isLive(request);
       this.endRequest(request.context.requestId);
       if (!live) {
@@ -513,6 +565,9 @@ export class GameCoordinator {
       }
       this.ingestObservation(result.observation);
     } finally {
+      if (reserved) {
+        this.deps.ledger.release(request.context.requestId);
+      }
       if (this.activeReadToken === token) {
         this.activeReadToken = null;
       }
