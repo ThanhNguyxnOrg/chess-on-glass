@@ -17,8 +17,8 @@
     "test:unit": "vitest run packages",
     "test:engine": "vitest run --config vitest.engine.config.ts",
     "test:native": "vitest run --config vitest.native.config.ts",
-    "test:e2e": "echo 'e2e requires Playwright browser install: npx playwright install' && exit 1",
-    "test:cloud-smoke": "echo 'cloud smoke requires owner opt-in: CHESSONGLASS_CLOUD_SMOKE=1' && exit 1",
+    "test:e2e": "vitest run packages/app/test/runtime/windows-application.test.ts",
+    "test:cloud-smoke": "vitest run packages/app/test/providers/offline-cloud-smoke.test.ts",
     "check:brand": "node scripts/check-brand.mjs",
     "eval": "npm run build && node packages/game/dist/cli-evaluate.js"
   },

@@ -108,6 +108,8 @@ npm run typecheck                                # TypeScript project-reference 
 npm --workspace=@chessonglass/ui run typecheck   # UI TypeScript check
 npm run build                                    # Build all packages + Vite UI bundle
 npm run check:brand                              # Brand asset SHA-256, metadata & hygiene checks
-npm run test:unit                                # Run unit & integration suite (67 files / 543 tests)
+npm run test:unit                                # Run unit & integration suite
+npm run test:e2e                                 # Local HTTP frame upload through move suggestion and speech (test adapters)
+npm run test:cloud-smoke                         # Offline replay through both provider SDKs; no keys or live API calls
 npm run eval -- --simulate                       # Deterministic oracle-free evaluation fixture
 ```
