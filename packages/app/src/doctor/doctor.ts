@@ -2,8 +2,19 @@ import { existsSync, readdirSync } from "node:fs";
 import { mkdir } from "node:fs/promises";
 import { delimiter, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { isSupported as wgcSupported } from "@screen-capture/node";
 import type { PlatformServices } from "@chessonglass/platform";
+
+async function checkWgcSupported(): Promise<boolean> {
+  if (process.platform !== "win32") {
+    return false;
+  }
+  try {
+    const mod = await import("@screen-capture/node");
+    return Boolean(mod.isSupported());
+  } catch {
+    return false;
+  }
+}
 
 export type DoctorCheckStatus = "ok" | "fail" | "not-run";
 
@@ -139,8 +150,9 @@ export async function runDoctor(options?: {
     )
   );
 
+  const wgcOk = await checkWgcSupported();
   checks.push(
-    check("wgc", wgcSupported(), wgcSupported() ? "WGC is supported" : "WGC is not supported")
+    check("wgc", wgcOk, wgcOk ? "WGC is supported" : "WGC is not supported")
   );
 
   const speechHelper = join(

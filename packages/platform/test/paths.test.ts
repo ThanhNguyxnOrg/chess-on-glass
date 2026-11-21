@@ -1,4 +1,4 @@
-import { join } from "node:path";
+import { posix, win32 } from "node:path";
 import { describe, expect, it } from "vitest";
 import { userDataDir } from "@chessonglass/platform";
 
@@ -15,33 +15,33 @@ describe("userDataDir", () => {
   it("ignores an empty or whitespace-only override", () => {
     expect(
       userDataDir({ CHESSONGLASS_DATA_DIR: "", APPDATA: "C:\\appdata" }, "win32", "C:\\home")
-    ).toBe(join("C:\\appdata", "ChessOnGlass"));
+    ).toBe(win32.join("C:\\appdata", "ChessOnGlass"));
     expect(
       userDataDir({ CHESSONGLASS_DATA_DIR: "   ", APPDATA: "C:\\appdata" }, "win32", "C:\\home")
-    ).toBe(join("C:\\appdata", "ChessOnGlass"));
+    ).toBe(win32.join("C:\\appdata", "ChessOnGlass"));
   });
 
   it("uses APPDATA on Windows", () => {
     expect(userDataDir({ APPDATA: "C:\\appdata" }, "win32", "C:\\home")).toBe(
-      join("C:\\appdata", "ChessOnGlass")
+      win32.join("C:\\appdata", "ChessOnGlass")
     );
   });
 
   it("uses Application Support on macOS", () => {
     expect(userDataDir({}, "darwin", "/Users/example")).toBe(
-      join("/Users/example", "Library", "Application Support", "ChessOnGlass")
+      posix.join("/Users/example", "Library", "Application Support", "ChessOnGlass")
     );
   });
 
   it("uses XDG_STATE_HOME on Linux when set", () => {
     expect(userDataDir({ XDG_STATE_HOME: "/state" }, "linux", "/home/example")).toBe(
-      join("/state", "ChessOnGlass")
+      posix.join("/state", "ChessOnGlass")
     );
   });
 
   it("falls back to ~/.local/state on Linux", () => {
     expect(userDataDir({}, "linux", "/home/example")).toBe(
-      join("/home/example", ".local", "state", "ChessOnGlass")
+      posix.join("/home/example", ".local", "state", "ChessOnGlass")
     );
   });
 

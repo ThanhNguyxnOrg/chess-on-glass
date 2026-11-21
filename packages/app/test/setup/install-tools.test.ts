@@ -121,7 +121,7 @@ describe("installTool", () => {
     };
     const fetchImpl = (async () => new Response(zip as unknown as BodyInit, { status: 200 })) as typeof fetch;
 
-    const path = await installTool("stockfish", { platform, manifest, fetchImpl });
+    const path = await installTool("stockfish", { platform, arch: "x64", manifest, fetchImpl });
     expect(path).toBe(join(root, "userdata", "tools", "stockfish", "stockfish.exe"));
     expect(new Uint8Array(await readFile(path))).toEqual(EXE);
   });
@@ -162,7 +162,7 @@ describe("installTool", () => {
         }
       ]
     };
-    await expect(installTool("stockfish", { platform, manifest })).rejects.toThrow(/sha256/i);
+    await expect(installTool("stockfish", { platform, arch: "x64", manifest })).rejects.toThrow(/sha256/i);
     const tools = await readdir(join(root, "userdata", "tools")).then(
       (entries) => entries,
       () => ["missing"]

@@ -1,4 +1,4 @@
-import { join } from "node:path";
+import { posix, win32 } from "node:path";
 
 /**
  * Resolve the per-user data directory without assuming a POSIX host.
@@ -20,16 +20,16 @@ export function userDataDir(
     if (appData === undefined || appData.trim() === "") {
       throw new Error("APPDATA is required to resolve the Windows user data directory");
     }
-    return join(appData, "ChessOnGlass");
+    return win32.join(appData, "ChessOnGlass");
   }
 
   if (platform === "darwin") {
-    return join(home, "Library", "Application Support", "ChessOnGlass");
+    return posix.join(home, "Library", "Application Support", "ChessOnGlass");
   }
 
   const stateHome = env.XDG_STATE_HOME;
   if (stateHome !== undefined && stateHome.trim() !== "") {
-    return join(stateHome, "ChessOnGlass");
+    return posix.join(stateHome, "ChessOnGlass");
   }
-  return join(home, ".local", "state", "ChessOnGlass");
+  return posix.join(home, ".local", "state", "ChessOnGlass");
 }

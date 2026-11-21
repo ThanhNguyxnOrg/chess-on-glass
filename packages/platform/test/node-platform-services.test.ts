@@ -1,4 +1,4 @@
-import { join } from "node:path";
+import { posix as posixPath } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import {
   NativeSecretStoreError,
@@ -40,9 +40,8 @@ describe("NodePlatformServices", () => {
       env: {},
       home: "/Users/dev"
     });
-    // join() keeps the expectation honest on any host path separator.
     expect(posix.userDataDir()).toBe(
-      join("/Users/dev", "Library", "Application Support", "ChessOnGlass")
+      posixPath.join("/Users/dev", "Library", "Application Support", "ChessOnGlass")
     );
   });
 
