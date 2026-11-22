@@ -113,3 +113,7 @@ npm run test:e2e                                 # Local HTTP frame upload throu
 npm run test:cloud-smoke                         # Offline replay through both provider SDKs; no keys or live API calls
 npm run eval -- --simulate                       # Deterministic oracle-free evaluation fixture
 ```
+
+## License
+
+ChessOnGlass application code is licensed under the [MIT License](LICENSE).

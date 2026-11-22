@@ -2,6 +2,7 @@
   "name": "chessonglass",
   "version": "0.0.0",
   "private": true,
+  "license": "MIT",
   "description": "ChessOnGlass: a local-first, cross-platform chess assistant.",
   "type": "module",
   "engines": {
