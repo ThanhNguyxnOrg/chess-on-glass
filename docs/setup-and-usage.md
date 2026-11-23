@@ -5,7 +5,7 @@ This guide covers installing, configuring, and running **ChessOnGlass** end-to-e
 ## Prerequisites
 
 - **Node.js 24 LTS** or newer
-- **OS:** Windows 10/11 x64 (full native WGC capture + `System.Speech` TTS + Windows Credential Manager support); macOS & Linux supported for the portable core, browser webcam, replay, and keyring
+- **OS:** Windows 10/11 x64 (native WGC capture + `System.Speech` TTS + Windows Credential Manager support); macOS & Linux support the portable core, browser webcam, and replay with manually supplied tools (see below). Native WGC capture and speech are Windows-only. Key storage requires an available OS keyring (Linux Secret Service).
 - **Vision AI API Key:** an **OpenAI** or **Anthropic** API key for live board reading
 
 ## Installation
@@ -25,15 +25,28 @@ Run the built-in diagnostics check to inspect Node version, user-data storage, O
 node packages/app/dist/cli.js doctor
 ```
 
-If Stockfish or FFmpeg is missing, install the SHA-256 verified binaries into your user data directory (`%APPDATA%\ChessOnGlass\tools` on Windows):
+On Windows x64, install missing SHA-256 verified binaries into your user data directory (`%APPDATA%\ChessOnGlass\tools` on Windows):
 
 ```sh
 node packages/app/dist/cli.js install-tools
 ```
 
-You can also point to existing local binaries using environment variables:
+| Platform | Key | Stockfish via `install-tools` | FFmpeg via `install-tools` |
+|---|---|---|---|
+| Windows x64 | `win32/x64` | Verified download | Verified download |
+| Windows ARM64 | `win32/arm64` | Unverified; refused | No artifact |
+| macOS x64 | `darwin/x64` | Unverified; refused | No artifact |
+| macOS ARM64 | `darwin/arm64` | Unverified; refused | No artifact |
+| Linux x64 | `linux/x64` | Unverified; refused | No artifact |
+| Linux ARM64 / other OS/architectures | All other keys | No artifact | No artifact |
+
+Keys are Node.js OS/architecture pairs. Unverified manifest entries fail closed; missing entries have no download fallback. `install-tools` defaults to Stockfish then FFmpeg and stops on the first failure. Nothing is downloaded during `npm ci` or startup.
+
+On macOS/Linux and Windows ARM64, supply both tools yourself. Other OS/architectures have no tool artifacts; this table does not imply application support there. Point to existing local binaries using environment variables:
 - `CHESSONGLASS_STOCKFISH` — absolute path to a Stockfish executable
 - `CHESSONGLASS_FFMPEG` — absolute path to an FFmpeg executable
+
+The app resolves these overrides, then executables in the user-data `tools/<tool>` directories. `doctor` additionally searches `PATH`; a successful PATH check alone does not configure the app, so set the overrides even when your tools are on `PATH`. On macOS/Linux, `doctor` still reports unavailable WGC and the Windows speech helper; those checks do not mean the portable features are unavailable.
 
 ### Windows Speech Helper (Optional Rebuild)
 
@@ -93,6 +106,6 @@ The server binds to `http://127.0.0.1:<port>` and passes a one-time 256-bit laun
 |---|---|
 | **Camera denied** | Allow camera permission in browser and in Windows *Settings → Privacy & security → Camera*. |
 | **No voice output** | Verify `SpeechHelper.exe` via `doctor`, check **Voice Readout** is enabled, and confirm system volume. |
-| **Stockfish or FFmpeg missing** | Run `node packages/app/dist/cli.js install-tools` or set `CHESSONGLASS_STOCKFISH` / `CHESSONGLASS_FFMPEG`. |
+| **Stockfish or FFmpeg missing** | On Windows x64, run `node packages/app/dist/cli.js install-tools`; otherwise install the tools yourself. Set `CHESSONGLASS_STOCKFISH` / `CHESSONGLASS_FFMPEG` to existing executable paths. |
 | **Budget exhausted** | Paid vision reads pause automatically at `maxCostUsd`. Increase **Max Budget (USD)** in Settings and restart to raise the session limit. |
 | **Missing launch token** | Always open the dashboard via `node packages/app/dist/cli.js run` rather than bookmarking a bare port URL. |

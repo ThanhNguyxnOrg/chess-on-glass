@@ -63,12 +63,25 @@ npm run build
 # 2. Verify local environment and capabilities
 node packages/app/dist/cli.js doctor
 
-# 3. Install SHA-256 verified Stockfish & FFmpeg binaries (if not already present)
+# 3. Windows x64 only: install SHA-256 verified Stockfish & FFmpeg binaries
 node packages/app/dist/cli.js install-tools
 
 # 4. Launch ChessOnGlass
 node packages/app/dist/cli.js run
 ```
+
+Tool installation depends on the platform (Node.js OS/architecture keys):
+
+| Platform | Key | Stockfish via `install-tools` | FFmpeg via `install-tools` |
+|---|---|---|---|
+| Windows x64 | `win32/x64` | Verified download | Verified download |
+| Windows ARM64 | `win32/arm64` | Unverified; refused | No artifact |
+| macOS x64 | `darwin/x64` | Unverified; refused | No artifact |
+| macOS ARM64 | `darwin/arm64` | Unverified; refused | No artifact |
+| Linux x64 | `linux/x64` | Unverified; refused | No artifact |
+| Linux ARM64 / other OS/architectures | All other keys | No artifact | No artifact |
+
+Downloads happen only when explicitly running `install-tools`, not during `npm ci` or startup. On platforms without verified downloads, install Stockfish and FFmpeg yourself and set `CHESSONGLASS_STOCKFISH` and `CHESSONGLASS_FFMPEG` to their absolute executable paths before running the app. `doctor` also searches `PATH`, but the app does not. macOS/Linux support the portable core, browser webcam and replay (with your own FFmpeg), not WGC capture or native speech. Key storage requires an available OS keyring (Linux Secret Service). See the [setup guide](docs/setup-and-usage.md) for details.
 
 To analyze a recorded video directly:
 
